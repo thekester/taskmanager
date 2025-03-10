@@ -50,10 +50,12 @@ Join our community of developers creating universal apps.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
 
 
-
+```bash
 npm install expo-linear-gradient --save
 npm install react-native-svg-transformer --save-dev
 npm install react-native-sqlite-storage --save
 npm install @react-native-async-storage/async-storage --save
 npm install @react-native-picker/picker --save
-
+npm install react-datepicker --save
+npm install react-native-date-picker --save
+```

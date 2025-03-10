@@ -15,6 +15,17 @@ import { Picker } from '@react-native-picker/picker';
 import SQLite from 'react-native-sqlite-storage';
 import { WebView } from 'react-native-webview';
 
+// For web, import react-datepicker and its CSS.
+let WebDatePicker: any = null;
+if (Platform.OS === 'web') {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  WebDatePicker = require('react-datepicker').default;
+  require('react-datepicker/dist/react-datepicker.css');
+}
+
+// For mobile (Android/iOS), import react-native-date-picker.
+import DatePickerMobile from 'react-native-date-picker';
+
 interface Task {
   id: string | number;
   task: string;
@@ -34,8 +45,7 @@ if (Platform.OS !== 'web') {
  *
  * On mobile platforms it uses a WebView.
  * On web platforms, it injects Mapbox CSS and JS via a useEffect hook and initializes the map
- * in a referenced div container. Clicking on the map updates the selected location without refreshing
- * the map.
+ * in a referenced div container. Clicking on the map updates the selected location without refreshing the map.
  */
 interface MapboxGLJSSelectorProps {
   onLocationSelect: (coords: number[]) => void;
@@ -47,7 +57,6 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
 
   if (Platform.OS === 'web') {
     const containerRef = useRef<HTMLDivElement>(null);
-
     useEffect(() => {
       function initializeMap() {
         if (window.mapboxgl && containerRef.current) {
@@ -59,7 +68,6 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
             zoom: 9,
           });
           map.addControl(new window.mapboxgl.NavigationControl());
-          // Add search box once the map has fully loaded
           map.on('load', () => {
             if (window.MapboxSearchBox) {
               const searchBox = new window.MapboxSearchBox();
@@ -73,15 +81,12 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
               map.addControl(searchBox);
             }
           });
-          // Listen for clicks and update the selected location without reloading the map
           map.on('click', (e: any) => {
             const lngLat = e.lngLat;
             onLocationSelect([lngLat.lng, lngLat.lat]);
           });
         }
       }
-
-      // Inject Mapbox CSS if not already present
       if (!document.getElementById('mapbox-gl-css')) {
         const link = document.createElement('link');
         link.id = 'mapbox-gl-css';
@@ -89,15 +94,12 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
         link.href = 'https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.css';
         document.head.appendChild(link);
       }
-
-      // Inject Mapbox JS if not already present
       if (!document.getElementById('mapbox-gl-js')) {
         const script = document.createElement('script');
         script.id = 'mapbox-gl-js';
         script.src = 'https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.js';
         script.async = true;
         script.onload = () => {
-          // Inject the search script after the main Mapbox script loads
           if (!document.getElementById('search-js')) {
             const searchScript = document.createElement('script');
             searchScript.id = 'search-js';
@@ -123,7 +125,6 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
     );
   }
 
-  // Mobile: use WebView to load an HTML content string
   const htmlContent = `
 <!DOCTYPE html>
 <html>
@@ -203,10 +204,11 @@ const selectorStyles = StyleSheet.create({
 });
 
 const TaskManagerScreen: React.FC = () => {
+  // Use one Date state for both platforms.
+  const [date, setDate] = useState<Date>(new Date());
   const [tasks, setTasks] = useState<Task[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [taskInput, setTaskInput] = useState('');
-  const [date, setDate] = useState('');
   const [location, setLocation] = useState('');
   const [distance, setDistance] = useState('');
   const [category, setCategory] = useState('Travail');
@@ -264,7 +266,10 @@ const TaskManagerScreen: React.FC = () => {
   };
 
   const handleSaveTask = () => {
-    if (!taskInput || !date) {
+    // Convert the Date object to YYYY-MM-DD string.
+    const dateString = date.toISOString().slice(0, 10);
+
+    if (!taskInput || !dateString) {
       Alert.alert('Erreur', 'Veuillez remplir au moins le titre et la date.');
       return;
     }
@@ -273,14 +278,14 @@ const TaskManagerScreen: React.FC = () => {
         db.transaction((tx: any) => {
           tx.executeSql(
             'UPDATE tasks SET task=?, date=?, location=?, distance=?, category=? WHERE id=?;',
-            [taskInput, date, location, distance, category, editingTaskId],
+            [taskInput, dateString, location, distance, category, editingTaskId],
             () => loadTasks(),
             (error: any) => console.log('Error updating task in SQLite:', error)
           );
         });
       } else {
         const updatedTasks = tasks.map((t) =>
-          t.id === editingTaskId ? { ...t, task: taskInput, date, location, distance, category } : t
+          t.id === editingTaskId ? { ...t, task: taskInput, date: dateString, location, distance, category } : t
         );
         setTasks(updatedTasks);
         saveTasksToAsyncStorage(updatedTasks);
@@ -291,7 +296,7 @@ const TaskManagerScreen: React.FC = () => {
         db.transaction((tx: any) => {
           tx.executeSql(
             'INSERT INTO tasks (task, date, location, distance, category) VALUES (?,?,?,?,?);',
-            [taskInput, date, location, distance, category],
+            [taskInput, dateString, location, distance, category],
             () => loadTasks(),
             (error: any) => console.log('Error inserting task in SQLite:', error)
           );
@@ -300,7 +305,7 @@ const TaskManagerScreen: React.FC = () => {
         const newTask: Task = {
           id: Math.random().toString(),
           task: taskInput,
-          date,
+          date: dateString,
           location,
           distance,
           category,
@@ -310,9 +315,9 @@ const TaskManagerScreen: React.FC = () => {
         saveTasksToAsyncStorage(updatedTasks);
       }
     }
-    // Reset input fields and close modal
+    // Reset input fields and close modal.
     setTaskInput('');
-    setDate('');
+    setDate(new Date());
     setLocation('');
     setDistance('');
     setCategory('Travail');
@@ -340,7 +345,7 @@ const TaskManagerScreen: React.FC = () => {
     const taskToEdit = tasks.find((t) => t.id === id);
     if (taskToEdit) {
       setTaskInput(taskToEdit.task);
-      setDate(taskToEdit.date);
+      setDate(new Date(taskToEdit.date));
       setLocation(taskToEdit.location || '');
       setDistance(taskToEdit.distance || '');
       setCategory(taskToEdit.category || 'Travail');
@@ -390,7 +395,8 @@ const TaskManagerScreen: React.FC = () => {
           setModalVisible(true);
           setEditingTaskId(null);
           setTaskInput('');
-          setDate('');
+          // Reset the date to today when opening the modal.
+          setDate(new Date());
           setLocation('');
           setDistance('');
           setCategory('Travail');
@@ -425,12 +431,17 @@ const TaskManagerScreen: React.FC = () => {
               value={taskInput}
               onChangeText={setTaskInput}
             />
-            <TextInput
-              style={styles.modalInput}
-              placeholder="Date (ex: 2025-03-05)"
-              value={date}
-              onChangeText={setDate}
-            />
+            {Platform.OS === 'web' ? (
+              // Use react-datepicker on web.
+              <WebDatePicker
+                selected={date}
+                onChange={(selectedDate: Date) => setDate(selectedDate)}
+                dateFormat="yyyy-MM-dd"
+              />
+            ) : (
+              // Use react-native-date-picker for Android/iOS in inline mode.
+              <DatePickerMobile date={date} onDateChange={setDate} mode="date" />
+            )}
             <TextInput
               style={styles.modalInput}
               placeholder="Emplacement (optionnel)"
