@@ -1,15 +1,15 @@
 // tasks.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
-  TextInput,
   Alert,
   StyleSheet,
   TouchableOpacity,
   Modal,
   SectionList,
   Platform,
+  TextInput,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
@@ -17,48 +17,255 @@ import SQLite from 'react-native-sqlite-storage';
 import { WebView } from 'react-native-webview';
 
 // ***** expo-router *****
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 
-// Pour web, import react-datepicker et son CSS
+// ***** Date pickers (web vs mobile) *****
 let WebDatePicker: any = null;
 if (Platform.OS === 'web') {
   WebDatePicker = require('react-datepicker').default;
   require('react-datepicker/dist/react-datepicker.css');
+} else {
+  // Sur mobile, on utilise react-native-date-picker
+  // npm install react-native-date-picker
+  // cd ios && pod install (si iOS)
+  var DatePickerMobile = require('react-native-date-picker').default;
 }
 
-// Pour mobile, import react-native-date-picker
-import DatePickerMobile from 'react-native-date-picker';
-
+// ***** Type(s) et interface(s) *****
 interface Task {
   id: string | number;
   task: string;
-  date: string;
-  location?: string;
+  date: string;        // Stocké en string dans la DB
+  location?: string;   // JSON string: [longitude, latitude]
   distance?: string;
   category: string;
 }
 
+// ***** SQLite si pas sur web *****
 let db: any = null;
 if (Platform.OS !== 'web') {
   db = SQLite.openDatabase({ name: 'tasks.db', location: 'default' });
 }
 
-const TasksScreen: React.FC = () => {
+// ***** Composant MapboxGLJSSelector *****
+interface MapboxGLJSSelectorProps {
+  onLocationSelect: (coords: number[]) => void;
+}
+
+const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({
+  onLocationSelect,
+}) => {
+  const MAPBOX_ACCESS_TOKEN =
+    'pk.eyJ1IjoibWFwcHltYWFuaWFjIiwiYSI6ImNtODFuZ3AxejEyZmUycnM1MHFpazN0OXQifQ.Y_6RTH2rn8M1QOgSHEQhJg';
+
+  if (Platform.OS === 'web') {
+    const containerRef = useRef<HTMLDivElement>(null);
+
+    useEffect(() => {
+      console.log('[MapboxGLJSSelector] useEffect web -> init map');
+      function initializeMap() {
+        if (window.mapboxgl && containerRef.current) {
+          console.log('[MapboxGLJSSelector] initializeMap -> mapboxgl found');
+          window.mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
+          const map = new window.mapboxgl.Map({
+            container: containerRef.current,
+            style: 'mapbox://styles/mapbox/streets-v12',
+            center: [-74.5, 40],
+            zoom: 9,
+          });
+          map.addControl(new window.mapboxgl.NavigationControl());
+          map.on('load', () => {
+            console.log('[MapboxGLJSSelector] Map loaded (web).');
+            if (window.MapboxSearchBox) {
+              console.log('[MapboxGLJSSelector] MapboxSearchBox found, adding search control');
+              const searchBox = new window.MapboxSearchBox();
+              searchBox.accessToken = window.mapboxgl.accessToken;
+              searchBox.options = {
+                types: 'address,poi',
+                proximity: [-74.0066, 40.7135],
+              };
+              searchBox.marker = true;
+              searchBox.mapboxgl = window.mapboxgl;
+              map.addControl(searchBox);
+            }
+          });
+          map.on('click', (e: any) => {
+            const lngLat = e.lngLat;
+            console.log('[MapboxGLJSSelector] Map clicked:', lngLat);
+            onLocationSelect([lngLat.lng, lngLat.lat]);
+          });
+        } else {
+          console.log('[MapboxGLJSSelector] window.mapboxgl not found or containerRef is null');
+        }
+      }
+
+      // Injection du CSS + JS si pas déjà présent
+      if (!document.getElementById('mapbox-gl-css')) {
+        console.log('[MapboxGLJSSelector] injecting mapbox-gl CSS');
+        const link = document.createElement('link');
+        link.id = 'mapbox-gl-css';
+        link.rel = 'stylesheet';
+        link.href = 'https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.css';
+        document.head.appendChild(link);
+      }
+      if (!document.getElementById('mapbox-gl-js')) {
+        console.log('[MapboxGLJSSelector] injecting mapbox-gl JS');
+        const script = document.createElement('script');
+        script.id = 'mapbox-gl-js';
+        script.src = 'https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.js';
+        script.async = true;
+        script.onload = () => {
+          console.log('[MapboxGLJSSelector] mapbox-gl JS loaded');
+          if (!document.getElementById('search-js')) {
+            console.log('[MapboxGLJSSelector] injecting search-js');
+            const searchScript = document.createElement('script');
+            searchScript.id = 'search-js';
+            searchScript.defer = true;
+            searchScript.src = 'https://api.mapbox.com/search-js/v1.0.0/web.js';
+            document.body.appendChild(searchScript);
+            searchScript.onload = () => {
+              console.log('[MapboxGLJSSelector] search-js loaded -> initializeMap()');
+              initializeMap();
+            };
+          } else {
+            initializeMap();
+          }
+        };
+        document.body.appendChild(script);
+      } else {
+        console.log('[MapboxGLJSSelector] mapbox-gl JS already present -> initializeMap()');
+        initializeMap();
+      }
+    }, [MAPBOX_ACCESS_TOKEN, onLocationSelect]);
+
+    return (
+      <div
+        ref={containerRef}
+        style={{ height: 300, marginTop: 10, marginBottom: 10 }}
+      />
+    );
+  }
+
+  // Mobile
+  console.log('[MapboxGLJSSelector] -> using WebView for mobile');
+  const htmlContent = `
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <title>Mapbox GL JS Selector</title>
+    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
+    <link href="https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.css" rel="stylesheet">
+    <script src="https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.js"></script>
+    <script id="search-js" defer src="https://api.mapbox.com/search-js/v1.0.0/web.js"></script>
+    <style>
+      body { margin: 0; padding: 0; }
+      #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+    </style>
+  </head>
+  <body>
+    <div id="map"></div>
+    <script>
+      console.log('[Mobile HTML] Map script start');
+      mapboxgl.accessToken = '${MAPBOX_ACCESS_TOKEN}';
+      const map = new mapboxgl.Map({
+        container: 'map',
+        style: 'mapbox://styles/mapbox/streets-v12',
+        center: [-74.5, 40],
+        zoom: 9
+      });
+      map.addControl(new mapboxgl.NavigationControl());
+      map.on('load', () => {
+        console.log('[Mobile HTML] map loaded');
+        if (typeof MapboxSearchBox !== 'undefined') {
+          console.log('[Mobile HTML] MapboxSearchBox found, adding it');
+          const searchBox = new MapboxSearchBox();
+          searchBox.accessToken = mapboxgl.accessToken;
+          searchBox.options = {
+            types: 'address,poi',
+            proximity: [-74.0066, 40.7135]
+          };
+          searchBox.marker = true;
+          searchBox.mapboxgl = mapboxgl;
+          map.addControl(searchBox);
+        } else {
+          console.log('[Mobile HTML] MapboxSearchBox not found');
+        }
+      });
+      map.on('click', (e) => {
+        const lngLat = e.lngLat;
+        console.log('[Mobile HTML] Map clicked', lngLat);
+        window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
+          longitude: lngLat.lng,
+          latitude: lngLat.lat
+        }));
+      });
+    </script>
+  </body>
+</html>
+  `;
+
+  return (
+    <View style={selectorStyles.container}>
+      <WebView
+        originWhitelist={['*']}
+        source={{ html: htmlContent }}
+        style={selectorStyles.webview}
+        onMessage={(event) => {
+          try {
+            const data = JSON.parse(event.nativeEvent.data);
+            console.log('[MapboxGLJSSelector] Received coords from mobile:', data);
+            onLocationSelect([data.longitude, data.latitude]);
+          } catch (err) {
+            console.error('Error parsing message from WebView:', err);
+          }
+        }}
+      />
+    </View>
+  );
+};
+
+const selectorStyles = StyleSheet.create({
+  container: {
+    height: 300,
+    marginTop: 10,
+    marginBottom: 10,
+  },
+  webview: {
+    flex: 1,
+  },
+});
+
+// ===========================
+// Tâches Screen principal
+// ===========================
+export default function TasksScreen() {
+  console.log('[TasksScreen] RENDER');
+
+  // État pour la liste de tâches
   const [tasks, setTasks] = useState<Task[]>([]);
+  // État du modal
   const [modalVisible, setModalVisible] = useState(false);
+
+  // État du datePicker
+  const [date, setDate] = useState<Date>(new Date());
+
+  // Champs du formulaire
   const [taskInput, setTaskInput] = useState('');
-  const [date, setDate] = useState(new Date());
   const [location, setLocation] = useState('');
   const [distance, setDistance] = useState('');
   const [category, setCategory] = useState('Travail');
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
 
-  // ***** Récupérer l’ID de la tâche à éditer via expo-router *****
-  // Sur les versions < v2, le hook s'appelle useLocalSearchParams :
+  // expo-router
   const { editTaskId } = useLocalSearchParams();
+  const router = useRouter();
 
-  // Ouvrir la DB et charger les tâches
+  console.log('[TasksScreen] editTaskId =', editTaskId);
+
+  // ***** Créer la table et charger les tâches *****
   useEffect(() => {
+    console.log('[TasksScreen] useEffect -> create table + load tasks');
     if (Platform.OS !== 'web') {
       db.transaction((tx: any) => {
         tx.executeSql(
@@ -73,7 +280,9 @@ const TasksScreen: React.FC = () => {
     }
   }, []);
 
+  // ***** Charger les tâches *****
   const loadTasks = () => {
+    console.log('[TasksScreen] loadTasks called');
     if (Platform.OS !== 'web') {
       db.transaction((tx: any) => {
         tx.executeSql(
@@ -84,6 +293,7 @@ const TasksScreen: React.FC = () => {
             for (let i = 0; i < results.rows.length; i++) {
               loadedTasks.push(results.rows.item(i));
             }
+            console.log('[TasksScreen] tasks loaded from SQLite:', loadedTasks);
             setTasks(loadedTasks);
             try {
               AsyncStorage.setItem('tasks', JSON.stringify(loadedTasks));
@@ -96,55 +306,84 @@ const TasksScreen: React.FC = () => {
       });
     } else {
       const tasksStr = localStorage.getItem('tasks');
-      if (tasksStr) setTasks(JSON.parse(tasksStr));
+      if (tasksStr) {
+        const parsed = JSON.parse(tasksStr);
+        console.log('[TasksScreen] tasks loaded from localStorage:', parsed);
+        setTasks(parsed);
+      } else {
+        console.log('[TasksScreen] no tasks in localStorage');
+      }
     }
   };
 
-  // Vérifie si un editTaskId est présent, et ouvre la pop-up
+  // ***** Ouvrir automatiquement la pop-up si editTaskId est passé *****
   useEffect(() => {
+    console.log('[TasksScreen] useEffect -> checking editTaskId and tasks');
+    console.log('[TasksScreen] tasks =', tasks);
     if (editTaskId) {
-      const taskToEdit = tasks.find(
-        (t) => t.id.toString() === editTaskId.toString()
-      );
-      if (taskToEdit) {
-        setTaskInput(taskToEdit.task);
-        setDate(new Date(taskToEdit.date));
-        setLocation(taskToEdit.location || '');
-        setDistance(taskToEdit.distance || '');
-        setCategory(taskToEdit.category || 'Travail');
-        setEditingTaskId(taskToEdit.id.toString());
+      console.log('[TasksScreen] we have editTaskId:', editTaskId);
+      const found = tasks.find((t) => t.id.toString() === editTaskId.toString());
+      console.log('[TasksScreen] found task =', found);
+      if (found) {
+        console.log('[TasksScreen] opening modal for found task:', found);
+        setTaskInput(found.task);
+        setDate(new Date(found.date));
+        setLocation(found.location || '');
+        setDistance(found.distance || '');
+        setCategory(found.category || 'Travail');
+        setEditingTaskId(found.id.toString());
         setModalVisible(true);
+      } else {
+        console.log('[TasksScreen] no matching task found for editTaskId');
       }
+    } else {
+      console.log('[TasksScreen] no editTaskId -> do nothing');
     }
   }, [editTaskId, tasks]);
 
+  // ***** Sauvegarde en AsyncStorage *****
   const saveTasksToAsyncStorage = async (updatedTasks: Task[]) => {
     try {
       await AsyncStorage.setItem('tasks', JSON.stringify(updatedTasks));
+      console.log('[TasksScreen] saved tasks to AsyncStorage:', updatedTasks);
     } catch (error) {
       console.error('Error saving tasks to AsyncStorage:', error);
     }
   };
 
+  // ***** Fermer le modal + enlever editTaskId de l'URL *****
+  const closeModal = () => {
+    console.log('[TasksScreen] closeModal called');
+    setModalVisible(false);
+    setEditingTaskId(null);
+    // On retire le paramètre en remplaçant l'URL par /tasks
+    router.replace('/tasks');
+  };
+
+  // ***** Créer ou mettre à jour une tâche *****
   const handleSaveTask = () => {
+    console.log('[TasksScreen] handleSaveTask called');
     const dateString = date.toISOString();
     if (!taskInput || !dateString) {
       Alert.alert('Erreur', 'Veuillez remplir au moins le titre et la date.');
       return;
     }
     if (editingTaskId) {
-      // Mise à jour
+      console.log('[TasksScreen] update existing task, id=', editingTaskId);
       if (Platform.OS !== 'web') {
         db.transaction((tx: any) => {
           tx.executeSql(
             'UPDATE tasks SET task=?, date=?, location=?, distance=?, category=? WHERE id=?;',
             [taskInput, dateString, location, distance, category, editingTaskId],
-            () => loadTasks(),
+            () => {
+              console.log('[TasksScreen] updated task in SQLite -> reloading tasks');
+              loadTasks();
+            },
             (error: any) => console.log('Error updating task in SQLite:', error)
           );
         });
       } else {
-        const updatedTasks = tasks.map((t: Task) =>
+        const updatedTasks = tasks.map((t) =>
           t.id === editingTaskId
             ? {
                 ...t,
@@ -161,19 +400,22 @@ const TasksScreen: React.FC = () => {
       }
       setEditingTaskId(null);
     } else {
-      // Insertion
+      console.log('[TasksScreen] create new task');
       if (Platform.OS !== 'web') {
         db.transaction((tx: any) => {
           tx.executeSql(
             'INSERT INTO tasks (task, date, location, distance, category) VALUES (?,?,?,?,?);',
             [taskInput, dateString, location, distance, category],
-            () => loadTasks(),
+            () => {
+              console.log('[TasksScreen] inserted new task in SQLite -> reloading tasks');
+              loadTasks();
+            },
             (error: any) => console.log('Error inserting task in SQLite:', error)
           );
         });
       } else {
         const newTask: Task = {
-          id: Math.floor(Math.random() * 100000),
+          id: Math.floor(Math.random() * 100000).toString(),
           task: taskInput,
           date: dateString,
           location,
@@ -185,34 +427,43 @@ const TasksScreen: React.FC = () => {
         saveTasksToAsyncStorage(updatedTasks);
       }
     }
+    // Reset et fermeture
     setTaskInput('');
     setDate(new Date());
     setLocation('');
     setDistance('');
     setCategory('Travail');
-    setModalVisible(false);
+    closeModal();
   };
 
+  // ***** Supprimer une tâche *****
   const handleDeleteTask = (id: string | number) => {
+    console.log('[TasksScreen] handleDeleteTask -> id=', id);
     if (Platform.OS !== 'web') {
       db.transaction((tx: any) => {
         tx.executeSql(
           'DELETE FROM tasks WHERE id=?;',
           [id],
-          () => loadTasks(),
+          () => {
+            console.log('[TasksScreen] deleted task in SQLite -> reloading tasks');
+            loadTasks();
+          },
           (error: any) => console.log('Error deleting task from SQLite:', error)
         );
       });
     } else {
-      const updatedTasks = tasks.filter((t: Task) => t.id !== id);
+      const updatedTasks = tasks.filter((t) => t.id !== id);
       setTasks(updatedTasks);
       saveTasksToAsyncStorage(updatedTasks);
     }
   };
 
+  // ***** Éditer une tâche localement (bouton "Modifier") *****
   const handleEditTask = (id: string | number) => {
+    console.log('[TasksScreen] handleEditTask -> id=', id);
     const taskToEdit = tasks.find((t) => t.id === id);
     if (taskToEdit) {
+      console.log('[TasksScreen] editing found task =', taskToEdit);
       setTaskInput(taskToEdit.task);
       setDate(new Date(taskToEdit.date));
       setLocation(taskToEdit.location || '');
@@ -220,9 +471,12 @@ const TasksScreen: React.FC = () => {
       setCategory(taskToEdit.category || 'Travail');
       setEditingTaskId(id.toString());
       setModalVisible(true);
+    } else {
+      console.log('[TasksScreen] no task found for id=', id);
     }
   };
 
+  // ***** Tri par catégorie *****
   const sortTasksByCategory = () => {
     const sorted: { [key: string]: Task[] } = {};
     tasks.forEach((t) => {
@@ -238,29 +492,43 @@ const TasksScreen: React.FC = () => {
     }));
   };
 
+  // ***** Rendu d'une tâche *****
   const renderTaskItem = ({ item }: { item: Task }) => (
     <View style={styles.taskItem}>
       <Text style={styles.taskText}>Tâche: {item.task}</Text>
       <Text style={styles.taskText}>Date: {item.date}</Text>
-      {item.location ? <Text style={styles.taskText}>Lieu: {item.location}</Text> : null}
-      {item.distance ? <Text style={styles.taskText}>Distance: {item.distance}m</Text> : null}
+      {item.location ? (
+        <Text style={styles.taskText}>Lieu: {item.location}</Text>
+      ) : null}
+      {item.distance ? (
+        <Text style={styles.taskText}>Distance: {item.distance}m</Text>
+      ) : null}
       <View style={styles.buttonContainer}>
-        <TouchableOpacity style={styles.editButton} onPress={() => handleEditTask(item.id)}>
+        <TouchableOpacity
+          style={styles.editButton}
+          onPress={() => handleEditTask(item.id)}
+        >
           <Text style={styles.editButtonText}>Modifier</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.deleteButton} onPress={() => handleDeleteTask(item.id)}>
+        <TouchableOpacity
+          style={styles.deleteButton}
+          onPress={() => handleDeleteTask(item.id)}
+        >
           <Text style={styles.deleteButtonText}>Supprimer</Text>
         </TouchableOpacity>
       </View>
     </View>
   );
 
+  // ***** Rendu principal *****
   return (
     <View style={styles.container}>
       <Text style={styles.header}>Gestion des Tâches</Text>
+
       <TouchableOpacity
         style={styles.addButton}
         onPress={() => {
+          console.log('[TasksScreen] "Create new Task" button pressed');
           setModalVisible(true);
           setEditingTaskId(null);
           setTaskInput('');
@@ -275,35 +543,45 @@ const TasksScreen: React.FC = () => {
 
       <SectionList
         sections={sortTasksByCategory()}
-        keyExtractor={(item: Task) => item.id.toString()}
+        keyExtractor={(item) => item.id.toString()}
         renderItem={renderTaskItem}
         renderSectionHeader={({ section }) => (
           <Text style={styles.sectionHeader}>{section.title}</Text>
         )}
       />
 
-      {/* MODAL */}
+      {/* MODAL de création / édition */}
       <Modal
         visible={modalVisible}
         animationType="slide"
         transparent
-        onRequestClose={() => setModalVisible(false)}
+        onRequestClose={closeModal}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContainer}>
             <Text style={styles.modalTitle}>
               {editingTaskId ? 'Modifier la tâche' : 'Nouvelle Tâche'}
             </Text>
+
+            {/* Titre de la tâche */}
             <TextInput
               style={styles.modalInput}
               placeholder="Titre de la tâche"
               value={taskInput}
-              onChangeText={setTaskInput}
+              onChangeText={(text) => {
+                console.log('[TasksScreen] setTaskInput ->', text);
+                setTaskInput(text);
+              }}
             />
+
+            {/* Date Picker (web vs mobile) */}
             {Platform.OS === 'web' ? (
               <WebDatePicker
                 selected={date}
-                onChange={(selectedDate: Date) => setDate(selectedDate)}
+                onChange={(selectedDate: Date) => {
+                  console.log('[TasksScreen] Date changed (web) ->', selectedDate);
+                  setDate(selectedDate);
+                }}
                 showTimeSelect
                 timeFormat="HH:mm"
                 timeIntervals={15}
@@ -311,30 +589,61 @@ const TasksScreen: React.FC = () => {
                 timeCaption="Heure"
               />
             ) : (
-              <DatePickerMobile date={date} onDateChange={setDate} mode="datetime" />
+              <DatePickerMobile
+                date={date}
+                onDateChange={(newDate: Date) => {
+                  console.log('[TasksScreen] Date changed (mobile) ->', newDate);
+                  setDate(newDate);
+                }}
+                mode="datetime"
+              />
             )}
+
+            {/* Emplacement (facultatif) */}
             <TextInput
               style={styles.modalInput}
               placeholder="Emplacement (optionnel)"
               value={location}
-              onChangeText={setLocation}
+              onChangeText={(text) => {
+                console.log('[TasksScreen] setLocation ->', text);
+                setLocation(text);
+              }}
             />
+
+            {/* Distance (facultatif) */}
             <TextInput
               style={styles.modalInput}
               placeholder="Distance (optionnel)"
               value={distance}
-              onChangeText={setDistance}
+              onChangeText={(text) => {
+                console.log('[TasksScreen] setDistance ->', text);
+                setDistance(text);
+              }}
               keyboardType="numeric"
             />
+
+            {/* Catégorie */}
             <Picker
               selectedValue={category}
               style={styles.picker}
-              onValueChange={(itemValue: string) => setCategory(itemValue)}
+              onValueChange={(itemValue: string) => {
+                console.log('[TasksScreen] setCategory ->', itemValue);
+                setCategory(itemValue);
+              }}
             >
               <Picker.Item label="Travail" value="Travail" />
               <Picker.Item label="Famille" value="Famille" />
               <Picker.Item label="Divers" value="Divers" />
             </Picker>
+
+            {/* Composant Mapbox pour sélectionner la position */}
+            <MapboxGLJSSelector
+              onLocationSelect={(coords) => {
+                console.log('[TasksScreen] onLocationSelect from Mapbox ->', coords);
+                setLocation(JSON.stringify(coords));
+              }}
+            />
+
             <View style={styles.modalButtonContainer}>
               <TouchableOpacity style={styles.modalButton} onPress={handleSaveTask}>
                 <Text style={styles.modalButtonText}>
@@ -343,7 +652,7 @@ const TasksScreen: React.FC = () => {
               </TouchableOpacity>
               <TouchableOpacity
                 style={[styles.modalButton, styles.cancelButton]}
-                onPress={() => setModalVisible(false)}
+                onPress={closeModal}
               >
                 <Text style={styles.modalButtonText}>Annuler</Text>
               </TouchableOpacity>
@@ -353,11 +662,9 @@ const TasksScreen: React.FC = () => {
       </Modal>
     </View>
   );
-};
+}
 
-export default TasksScreen;
-
-// Styles
+// ***** Styles *****
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, backgroundColor: '#f0f0f0' },
   header: {
@@ -384,16 +691,11 @@ const styles = StyleSheet.create({
   },
   taskItem: {
     backgroundColor: '#fff',
-    padding: 20,
-    borderRadius: 15,
+    padding: 15,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: '#ccc',
     marginBottom: 10,
-    shadowColor: '#000',
-    shadowOpacity: 0.15,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 5 },
-    elevation: 5,
   },
   taskText: { fontSize: 16, marginBottom: 5 },
   buttonContainer: {
