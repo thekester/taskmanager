@@ -1,16 +1,14 @@
+// _layout.tsx
 import { Tabs } from 'expo-router';
 import React from 'react';
 import { Platform } from 'react-native';
 
-// Composants personnalisés (à adapter selon ton projet)
+// Composants personnalisés et constantes (adaptez selon votre projet)
 import { HapticTab } from '@/components/HapticTab';
 import { IconSymbol } from '@/components/ui/IconSymbol';
 import TabBarBackground from '@/components/ui/TabBarBackground';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/useColorScheme';
-
-// IMPORTANT : on importe directement le fichier SVG comme un composant React :
-import LocationSvg from '../../assets/images/location.svg';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme();
@@ -18,20 +16,12 @@ export default function TabLayout() {
   return (
     <Tabs
       screenOptions={{
-        // Couleur de l’icône/tab actif
         tabBarActiveTintColor: Colors[colorScheme ?? 'light'].tint,
-        // Masque le header par défaut
         headerShown: false,
-        // Remplace la touche du tab par une version “haptique” (vibreur)
         tabBarButton: HapticTab,
-        // Arrière-plan personnalisé pour la barre
         tabBarBackground: TabBarBackground,
-        // Styles spécifiques par plateforme
         tabBarStyle: Platform.select({
-          ios: {
-            // Sur iOS, on peut rendre la barre "flottante"
-            position: 'absolute',
-          },
+          ios: { position: 'absolute' },
           default: {},
         }),
       }}
@@ -45,7 +35,6 @@ export default function TabLayout() {
           ),
         }}
       />
-
       <Tabs.Screen
         name="tasks"
         options={{
@@ -55,7 +44,6 @@ export default function TabLayout() {
           ),
         }}
       />
-
     </Tabs>
   );
 }

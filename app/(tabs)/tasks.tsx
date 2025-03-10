@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef } from 'react';
+// tasks.tsx
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,22 +16,24 @@ import { Picker } from '@react-native-picker/picker';
 import SQLite from 'react-native-sqlite-storage';
 import { WebView } from 'react-native-webview';
 
-// For web, import react-datepicker and its CSS.
+// ***** expo-router *****
+import { useLocalSearchParams } from 'expo-router';
+
+// Pour web, import react-datepicker et son CSS
 let WebDatePicker: any = null;
 if (Platform.OS === 'web') {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
   WebDatePicker = require('react-datepicker').default;
   require('react-datepicker/dist/react-datepicker.css');
 }
 
-// For mobile (Android/iOS), import react-native-date-picker.
+// Pour mobile, import react-native-date-picker
 import DatePickerMobile from 'react-native-date-picker';
 
 interface Task {
   id: string | number;
   task: string;
   date: string;
-  location?: string; // JSON string representing a tuple [longitude, latitude]
+  location?: string;
   distance?: string;
   category: string;
 }
@@ -40,181 +43,21 @@ if (Platform.OS !== 'web') {
   db = SQLite.openDatabase({ name: 'tasks.db', location: 'default' });
 }
 
-/**
- * MapboxGLJSSelector Component
- *
- * On mobile platforms it uses a WebView.
- * On web platforms, it injects Mapbox CSS and JS via a useEffect hook and initializes the map
- * in a referenced div container. Clicking on the map updates the selected location without refreshing the map.
- */
-interface MapboxGLJSSelectorProps {
-  onLocationSelect: (coords: number[]) => void;
-}
-
-const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelect }) => {
-  const MAPBOX_ACCESS_TOKEN =
-    'pk.eyJ1IjoibWFwcHltYWFuaWFjIiwiYSI6ImNtODFuZ3AxejEyZmUycnM1MHFpazN0OXQifQ.Y_6RTH2rn8M1QOgSHEQhJg';
-
-  if (Platform.OS === 'web') {
-    const containerRef = useRef<HTMLDivElement>(null);
-    useEffect(() => {
-      function initializeMap() {
-        if (window.mapboxgl && containerRef.current) {
-          window.mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
-          const map = new window.mapboxgl.Map({
-            container: containerRef.current,
-            style: 'mapbox://styles/mapbox/streets-v12',
-            center: [-74.5, 40],
-            zoom: 9,
-          });
-          map.addControl(new window.mapboxgl.NavigationControl());
-          map.on('load', () => {
-            if (window.MapboxSearchBox) {
-              const searchBox = new window.MapboxSearchBox();
-              searchBox.accessToken = window.mapboxgl.accessToken;
-              searchBox.options = {
-                types: 'address,poi',
-                proximity: [-74.0066, 40.7135],
-              };
-              searchBox.marker = true;
-              searchBox.mapboxgl = window.mapboxgl;
-              map.addControl(searchBox);
-            }
-          });
-          map.on('click', (e: any) => {
-            const lngLat = e.lngLat;
-            onLocationSelect([lngLat.lng, lngLat.lat]);
-          });
-        }
-      }
-      if (!document.getElementById('mapbox-gl-css')) {
-        const link = document.createElement('link');
-        link.id = 'mapbox-gl-css';
-        link.rel = 'stylesheet';
-        link.href = 'https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.css';
-        document.head.appendChild(link);
-      }
-      if (!document.getElementById('mapbox-gl-js')) {
-        const script = document.createElement('script');
-        script.id = 'mapbox-gl-js';
-        script.src = 'https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.js';
-        script.async = true;
-        script.onload = () => {
-          if (!document.getElementById('search-js')) {
-            const searchScript = document.createElement('script');
-            searchScript.id = 'search-js';
-            searchScript.defer = true;
-            searchScript.src = 'https://api.mapbox.com/search-js/v1.0.0/web.js';
-            document.body.appendChild(searchScript);
-            searchScript.onload = () => initializeMap();
-          } else {
-            initializeMap();
-          }
-        };
-        document.body.appendChild(script);
-      } else {
-        initializeMap();
-      }
-    }, [MAPBOX_ACCESS_TOKEN, onLocationSelect]);
-
-    return (
-      <div
-        ref={containerRef}
-        style={{ height: 300, marginTop: 10, marginBottom: 10 }}
-      />
-    );
-  }
-
-  const htmlContent = `
-<!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <title>Mapbox GL JS Selector</title>
-    <meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no">
-    <link href="https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.css" rel="stylesheet">
-    <script src="https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.js"></script>
-    <script id="search-js" defer src="https://api.mapbox.com/search-js/v1.0.0/web.js"></script>
-    <style>
-      body { margin: 0; padding: 0; }
-      #map { position: absolute; top: 0; bottom: 0; width: 100%; }
-    </style>
-  </head>
-  <body>
-    <div id="map"></div>
-    <script>
-      mapboxgl.accessToken = '${MAPBOX_ACCESS_TOKEN}';
-      const map = new mapboxgl.Map({
-        container: 'map',
-        style: 'mapbox://styles/mapbox/streets-v12',
-        center: [-74.5, 40],
-        zoom: 9
-      });
-      map.addControl(new mapboxgl.NavigationControl());
-      map.on('click', (e) => {
-        const lngLat = e.lngLat;
-        window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
-          longitude: lngLat.lng,
-          latitude: lngLat.lat
-        }));
-      });
-      map.on('load', () => {
-        const searchBox = new MapboxSearchBox();
-        searchBox.accessToken = mapboxgl.accessToken;
-        searchBox.options = {
-          types: 'address,poi',
-          proximity: [-74.0066, 40.7135]
-        };
-        searchBox.marker = true;
-        searchBox.mapboxgl = mapboxgl;
-        map.addControl(searchBox);
-      });
-    </script>
-  </body>
-</html>
-  `;
-  return (
-    <View style={selectorStyles.container}>
-      <WebView
-        originWhitelist={['*']}
-        source={{ html: htmlContent }}
-        style={selectorStyles.webview}
-        onMessage={(event) => {
-          try {
-            const data = JSON.parse(event.nativeEvent.data);
-            onLocationSelect([data.longitude, data.latitude]);
-          } catch (err) {
-            console.error('Error parsing message from WebView:', err);
-          }
-        }}
-      />
-    </View>
-  );
-};
-
-const selectorStyles = StyleSheet.create({
-  container: {
-    height: 300,
-    marginTop: 10,
-    marginBottom: 10,
-  },
-  webview: {
-    flex: 1,
-  },
-});
-
-const TaskManagerScreen: React.FC = () => {
-  // Use one Date state for both platforms.
-  const [date, setDate] = useState<Date>(new Date());
+const TasksScreen: React.FC = () => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [taskInput, setTaskInput] = useState('');
+  const [date, setDate] = useState(new Date());
   const [location, setLocation] = useState('');
   const [distance, setDistance] = useState('');
   const [category, setCategory] = useState('Travail');
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
-  const [locationCoords, setLocationCoords] = useState<number[] | null>(null);
 
+  // ***** Récupérer l’ID de la tâche à éditer via expo-router *****
+  // Sur les versions < v2, le hook s'appelle useLocalSearchParams :
+  const { editTaskId } = useLocalSearchParams();
+
+  // Ouvrir la DB et charger les tâches
   useEffect(() => {
     if (Platform.OS !== 'web') {
       db.transaction((tx: any) => {
@@ -257,6 +100,24 @@ const TaskManagerScreen: React.FC = () => {
     }
   };
 
+  // Vérifie si un editTaskId est présent, et ouvre la pop-up
+  useEffect(() => {
+    if (editTaskId) {
+      const taskToEdit = tasks.find(
+        (t) => t.id.toString() === editTaskId.toString()
+      );
+      if (taskToEdit) {
+        setTaskInput(taskToEdit.task);
+        setDate(new Date(taskToEdit.date));
+        setLocation(taskToEdit.location || '');
+        setDistance(taskToEdit.distance || '');
+        setCategory(taskToEdit.category || 'Travail');
+        setEditingTaskId(taskToEdit.id.toString());
+        setModalVisible(true);
+      }
+    }
+  }, [editTaskId, tasks]);
+
   const saveTasksToAsyncStorage = async (updatedTasks: Task[]) => {
     try {
       await AsyncStorage.setItem('tasks', JSON.stringify(updatedTasks));
@@ -266,14 +127,13 @@ const TaskManagerScreen: React.FC = () => {
   };
 
   const handleSaveTask = () => {
-    // Convert the Date object to YYYY-MM-DD string.
-    const dateString = date.toISOString().slice(0, 10);
-
+    const dateString = date.toISOString();
     if (!taskInput || !dateString) {
       Alert.alert('Erreur', 'Veuillez remplir au moins le titre et la date.');
       return;
     }
     if (editingTaskId) {
+      // Mise à jour
       if (Platform.OS !== 'web') {
         db.transaction((tx: any) => {
           tx.executeSql(
@@ -284,14 +144,24 @@ const TaskManagerScreen: React.FC = () => {
           );
         });
       } else {
-        const updatedTasks = tasks.map((t) =>
-          t.id === editingTaskId ? { ...t, task: taskInput, date: dateString, location, distance, category } : t
+        const updatedTasks = tasks.map((t: Task) =>
+          t.id === editingTaskId
+            ? {
+                ...t,
+                task: taskInput,
+                date: dateString,
+                location,
+                distance,
+                category,
+              }
+            : t
         );
         setTasks(updatedTasks);
         saveTasksToAsyncStorage(updatedTasks);
       }
       setEditingTaskId(null);
     } else {
+      // Insertion
       if (Platform.OS !== 'web') {
         db.transaction((tx: any) => {
           tx.executeSql(
@@ -303,7 +173,7 @@ const TaskManagerScreen: React.FC = () => {
         });
       } else {
         const newTask: Task = {
-          id: Math.random().toString(),
+          id: Math.floor(Math.random() * 100000),
           task: taskInput,
           date: dateString,
           location,
@@ -315,7 +185,6 @@ const TaskManagerScreen: React.FC = () => {
         saveTasksToAsyncStorage(updatedTasks);
       }
     }
-    // Reset input fields and close modal.
     setTaskInput('');
     setDate(new Date());
     setLocation('');
@@ -335,7 +204,7 @@ const TaskManagerScreen: React.FC = () => {
         );
       });
     } else {
-      const updatedTasks = tasks.filter((t) => t.id !== id);
+      const updatedTasks = tasks.filter((t: Task) => t.id !== id);
       setTasks(updatedTasks);
       saveTasksToAsyncStorage(updatedTasks);
     }
@@ -395,7 +264,6 @@ const TaskManagerScreen: React.FC = () => {
           setModalVisible(true);
           setEditingTaskId(null);
           setTaskInput('');
-          // Reset the date to today when opening the modal.
           setDate(new Date());
           setLocation('');
           setDistance('');
@@ -407,13 +275,14 @@ const TaskManagerScreen: React.FC = () => {
 
       <SectionList
         sections={sortTasksByCategory()}
-        keyExtractor={(item) => item.id.toString()}
+        keyExtractor={(item: Task) => item.id.toString()}
         renderItem={renderTaskItem}
         renderSectionHeader={({ section }) => (
           <Text style={styles.sectionHeader}>{section.title}</Text>
         )}
       />
 
+      {/* MODAL */}
       <Modal
         visible={modalVisible}
         animationType="slide"
@@ -432,15 +301,17 @@ const TaskManagerScreen: React.FC = () => {
               onChangeText={setTaskInput}
             />
             {Platform.OS === 'web' ? (
-              // Use react-datepicker on web.
               <WebDatePicker
                 selected={date}
                 onChange={(selectedDate: Date) => setDate(selectedDate)}
-                dateFormat="yyyy-MM-dd"
+                showTimeSelect
+                timeFormat="HH:mm"
+                timeIntervals={15}
+                dateFormat="yyyy-MM-dd HH:mm"
+                timeCaption="Heure"
               />
             ) : (
-              // Use react-native-date-picker for Android/iOS in inline mode.
-              <DatePickerMobile date={date} onDateChange={setDate} mode="date" />
+              <DatePickerMobile date={date} onDateChange={setDate} mode="datetime" />
             )}
             <TextInput
               style={styles.modalInput}
@@ -464,13 +335,6 @@ const TaskManagerScreen: React.FC = () => {
               <Picker.Item label="Famille" value="Famille" />
               <Picker.Item label="Divers" value="Divers" />
             </Picker>
-            {/* Use the MapboxGLJSSelector component for location selection */}
-            <MapboxGLJSSelector
-              onLocationSelect={(coords) => {
-                setLocation(JSON.stringify(coords));
-                setLocationCoords(coords);
-              }}
-            />
             <View style={styles.modalButtonContainer}>
               <TouchableOpacity style={styles.modalButton} onPress={handleSaveTask}>
                 <Text style={styles.modalButtonText}>
@@ -491,129 +355,109 @@ const TaskManagerScreen: React.FC = () => {
   );
 };
 
+export default TasksScreen;
+
+// Styles
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    padding: 20, 
-    backgroundColor: '#f0f0f0' 
+  container: { flex: 1, padding: 20, backgroundColor: '#f0f0f0' },
+  header: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    textAlign: 'center',
+    marginTop: 20,
+    marginBottom: 20,
   },
-  header: { 
-    fontSize: 24, 
-    fontWeight: 'bold', 
-    textAlign: 'center', 
-    marginTop: 20, 
-    marginBottom: 20 
+  addButton: {
+    backgroundColor: '#4CAF50',
+    padding: 15,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginBottom: 20,
   },
-  addButton: { 
-    backgroundColor: '#4CAF50', 
-    padding: 15, 
-    borderRadius: 8, 
-    alignItems: 'center', 
-    marginBottom: 20 
-  },
-  addButtonText: { 
-    color: '#fff', 
-    fontSize: 18 
-  },
-  sectionHeader: { 
-    fontSize: 18, 
-    fontWeight: 'bold', 
-    backgroundColor: '#eee', 
-    padding: 5, 
-    marginTop: 15 
+  addButtonText: { color: '#fff', fontSize: 18 },
+  sectionHeader: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    backgroundColor: '#eee',
+    padding: 5,
+    marginTop: 15,
   },
   taskItem: {
     backgroundColor: '#fff',
-    padding: 15,
-    borderRadius: 8,
+    padding: 20,
+    borderRadius: 15,
     borderWidth: 1,
     borderColor: '#ccc',
     marginBottom: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 5,
   },
-  taskText: { 
-    fontSize: 16, 
-    marginBottom: 5 
+  taskText: { fontSize: 16, marginBottom: 5 },
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10,
   },
-  buttonContainer: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    marginTop: 10 
+  editButton: {
+    flex: 0.48,
+    padding: 10,
+    backgroundColor: 'orange',
+    borderRadius: 5,
+    alignItems: 'center',
   },
-  editButton: { 
-    flex: 0.48, 
-    padding: 10, 
-    backgroundColor: 'orange', 
-    borderRadius: 5, 
-    alignItems: 'center' 
+  editButtonText: { color: '#fff', fontSize: 16 },
+  deleteButton: {
+    flex: 0.48,
+    padding: 10,
+    backgroundColor: 'red',
+    borderRadius: 5,
+    alignItems: 'center',
   },
-  editButtonText: { 
-    color: '#fff', 
-    fontSize: 16 
+  deleteButtonText: { color: '#fff', fontSize: 16 },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
-  deleteButton: { 
-    flex: 0.48, 
-    padding: 10, 
-    backgroundColor: 'red', 
-    borderRadius: 5, 
-    alignItems: 'center' 
+  modalContainer: {
+    width: '90%',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: 20,
   },
-  deleteButtonText: { 
-    color: '#fff', 
-    fontSize: 16 
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    marginBottom: 15,
+    textAlign: 'center',
+    color: '#333',
   },
-  modalOverlay: { 
-    flex: 1, 
-    backgroundColor: 'rgba(0,0,0,0.5)', 
-    justifyContent: 'center', 
-    alignItems: 'center' 
+  modalInput: {
+    backgroundColor: '#f9f9f9',
+    height: 45,
+    borderColor: '#ddd',
+    borderWidth: 1,
+    borderRadius: 8,
+    marginBottom: 15,
+    paddingHorizontal: 15,
   },
-  modalContainer: { 
-    width: '90%', 
-    backgroundColor: '#fff', 
-    borderRadius: 12, 
-    padding: 20 
+  picker: { height: 50, width: '100%', marginBottom: 15 },
+  modalButtonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
-  modalTitle: { 
-    fontSize: 24, 
-    fontWeight: '700', 
-    marginBottom: 15, 
-    textAlign: 'center', 
-    color: '#333' 
+  modalButton: {
+    flex: 1,
+    backgroundColor: '#4CAF50',
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginHorizontal: 5,
+    alignItems: 'center',
   },
-  modalInput: { 
-    backgroundColor: '#f9f9f9', 
-    height: 45, 
-    borderColor: '#ddd', 
-    borderWidth: 1, 
-    borderRadius: 8, 
-    marginBottom: 15, 
-    paddingHorizontal: 15 
-  },
-  picker: { 
-    height: 50, 
-    width: '100%', 
-    marginBottom: 15 
-  },
-  modalButtonContainer: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between' 
-  },
-  modalButton: { 
-    flex: 1, 
-    backgroundColor: '#4CAF50', 
-    paddingVertical: 12, 
-    borderRadius: 8, 
-    marginHorizontal: 5, 
-    alignItems: 'center' 
-  },
-  cancelButton: { 
-    backgroundColor: '#F44336' 
-  },
-  modalButtonText: { 
-    color: '#fff', 
-    fontSize: 18, 
-    fontWeight: '600' 
-  },
+  cancelButton: { backgroundColor: '#F44336' },
+  modalButtonText: { color: '#fff', fontSize: 18, fontWeight: '600' },
 });
-
-export default TaskManagerScreen;

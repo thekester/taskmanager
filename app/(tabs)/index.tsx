@@ -10,12 +10,13 @@ import {
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
+import SQLite from 'react-native-sqlite-storage';
+
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
 import ParallaxScrollView from '@/components/ParallaxScrollView';
-import SQLite from 'react-native-sqlite-storage';
 
-// Extend global Window to include Mapbox properties
 declare global {
   interface Window {
     mapboxgl: any;
@@ -26,8 +27,8 @@ declare global {
 interface Task {
   id: number;
   task: string;
-  date: string; // Scheduled or creation date
-  location?: string; // JSON string representing a tuple [longitude, latitude]
+  date: string; // Date et heure
+  location?: string; // JSON string représentant un tableau [longitude, latitude]
   distance?: string;
   category?: string;
 }
@@ -37,88 +38,145 @@ if (Platform.OS !== 'web') {
   db = SQLite.openDatabase({ name: 'tasks.db', location: 'default' });
 }
 
+interface MapboxGLJSWebViewProps {
+  tasks?: Task[];
+  onEditTask?: (taskId: string) => void;
+}
+
 /**
  * MapboxGLJSWebView Component
  *
- * For mobile: Loads a WebView that displays an HTML page using Mapbox GL JS.
- * For web: Injects the Mapbox GL JS scripts/CSS directly into a div.
- * A search box is added after the map loads.
+ * - Sur web : injecte les scripts/CSS Mapbox dans un div et ajoute un popup à chaque marqueur.
+ * - Sur mobile : charge une WebView contenant le code HTML de la carte. Le HTML injecte les marqueurs
+ *   avec un popup incluant un bouton qui, lorsqu'il est cliqué, appelle window.handleEdit.
  */
-const MapboxGLJSWebView: React.FC = () => {
+const MapboxGLJSWebView: React.FC<MapboxGLJSWebViewProps> = ({ tasks = [], onEditTask }) => {
   const MAPBOX_ACCESS_TOKEN =
     'pk.eyJ1IjoibWFwcHltYWFuaWFjIiwiYSI6ImNtODFuZ3AxejEyZmUycnM1MHFpazN0OXQifQ.Y_6RTH2rn8M1QOgSHEQhJg';
 
+  const extractMarkers = () => {
+    return tasks
+      .filter((t) => typeof t.location === 'string' && t.location.trim() !== '')
+      .map((t) => ({
+        coords: JSON.parse(t.location as string),
+        task: t,
+      }));
+  };
+
+  const markers = extractMarkers();
+  const mapContainer = useRef<HTMLDivElement>(null);
+
+  // Web
   if (Platform.OS === 'web') {
-    const mapContainer = useRef<HTMLDivElement>(null);
     useEffect(() => {
-      if (mapContainer.current && !document.getElementById('mapbox-gl-css')) {
-        // Inject Mapbox CSS
-        const link = document.createElement('link');
-        link.id = 'mapbox-gl-css';
-        link.rel = 'stylesheet';
-        link.href = 'https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.css';
-        document.head.appendChild(link);
-
-        // Inject Mapbox JS
-        const script = document.createElement('script');
-        script.src = 'https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.js';
-        script.async = true;
-        document.body.appendChild(script);
-
-        // Inject Search JS
-        const searchScript = document.createElement('script');
-        searchScript.id = 'search-js';
-        searchScript.defer = true;
-        searchScript.src = 'https://api.mapbox.com/search-js/v1.0.0/web.js';
-        document.body.appendChild(searchScript);
-
-        script.onload = () => initializeMap();
-      } else {
-        initializeMap();
-      }
-
       function initializeMap() {
-        // @ts-ignore
         if (window.mapboxgl && mapContainer.current) {
-          // @ts-ignore
           window.mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
-          // @ts-ignore
           const map = new window.mapboxgl.Map({
             container: mapContainer.current,
             style: 'mapbox://styles/mapbox/standard',
             center: [-74.5, 40],
             zoom: 9,
           });
-          // @ts-ignore
           map.addControl(new window.mapboxgl.NavigationControl());
-          // Add search box after the map loads
-          window.addEventListener('load', () => {
-            // @ts-ignore
-            const searchBox = new window.MapboxSearchBox();
-            searchBox.accessToken = window.mapboxgl.accessToken;
-            searchBox.options = {
-              types: 'address,poi',
-              proximity: [-74.0066, 40.7135],
+
+          map.on('load', () => {
+            if (window.MapboxSearchBox) {
+              const searchBox = new window.MapboxSearchBox();
+              searchBox.accessToken = window.mapboxgl.accessToken;
+              searchBox.options = {
+                types: 'address,poi',
+                proximity: [-74.0066, 40.7135],
+              };
+              searchBox.marker = true;
+              searchBox.mapboxgl = window.mapboxgl;
+              map.addControl(searchBox);
+            }
+
+            // Définition de la fonction globale pour l'édition (appelée par onclick)
+            (window as any).handleEdit = function (taskId: string) {
+              if (onEditTask) {
+                onEditTask(taskId);
+              } else {
+                console.log('Edit task requested for task id:', taskId);
+              }
             };
-            searchBox.marker = true;
-            searchBox.mapboxgl = window.mapboxgl;
-            map.addControl(searchBox);
+
+            // Ajout des marqueurs avec popup
+            markers.forEach((item) => {
+              const { coords, task } = item;
+              const popupHTML = `
+                <div>
+                  <strong>${task.task}</strong><br>
+                  Date: ${task.date}<br>
+                  ${
+                    task.distance
+                      ? 'Distance: ' + task.distance + 'm<br>'
+                      : ''
+                  }
+                  ${
+                    task.category
+                      ? 'Catégorie: ' + task.category + '<br>'
+                      : ''
+                  }
+                  <button onclick="handleEdit('${task.id}')">Modifier</button>
+                </div>
+              `;
+              new window.mapboxgl.Marker()
+                .setLngLat(coords)
+                .setPopup(
+                  new window.mapboxgl.Popup({ offset: 25 }).setHTML(popupHTML)
+                )
+                .addTo(map);
+            });
           });
+
           map.on('click', (e: any) => {
             const lngLat = e.lngLat;
             console.log('Map clicked at:', lngLat);
           });
         }
       }
-    }, []);
+
+      if (!document.getElementById('mapbox-gl-css')) {
+        const link = document.createElement('link');
+        link.id = 'mapbox-gl-css';
+        link.rel = 'stylesheet';
+        link.href = 'https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.css';
+        document.head.appendChild(link);
+      }
+      if (!document.getElementById('mapbox-gl-js')) {
+        const script = document.createElement('script');
+        script.id = 'mapbox-gl-js';
+        script.src = 'https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.js';
+        script.async = true;
+        script.onload = () => {
+          if (!document.getElementById('search-js')) {
+            const searchScript = document.createElement('script');
+            searchScript.id = 'search-js';
+            searchScript.defer = true;
+            searchScript.src = 'https://api.mapbox.com/search-js/v1.0.0/web.js';
+            document.body.appendChild(searchScript);
+            searchScript.onload = () => initializeMap();
+          } else {
+            initializeMap();
+          }
+        };
+        document.body.appendChild(script);
+      } else {
+        initializeMap();
+      }
+    }, [MAPBOX_ACCESS_TOKEN, tasks, onEditTask]);
+
     return (
       <div
         ref={mapContainer}
         style={{ height: '300px', width: '100%', marginTop: '10px', marginBottom: '10px' }}
       />
     );
-  } else {
-    // Mobile implementation using WebView
+  }
+  // Mobile
+  else {
     const htmlContent = `
 <!DOCTYPE html>
 <html>
@@ -132,6 +190,7 @@ const MapboxGLJSWebView: React.FC = () => {
     <style>
       body { margin: 0; padding: 0; }
       #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+      button { font-size: 14px; padding: 4px 8px; }
     </style>
   </head>
   <body>
@@ -148,11 +207,14 @@ const MapboxGLJSWebView: React.FC = () => {
       map.on('click', (e) => {
         const lngLat = e.lngLat;
         window.ReactNativeWebView.postMessage(JSON.stringify({
+          type: 'mapClick',
           longitude: lngLat.lng,
           latitude: lngLat.lat
         }));
       });
-      // Add search box after the map loads
+      window.handleEdit = function(taskId) {
+        window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'editTask', id: taskId }));
+      };
       window.addEventListener('load', () => {
         const searchBox = new MapboxSearchBox();
         searchBox.accessToken = mapboxgl.accessToken;
@@ -163,6 +225,20 @@ const MapboxGLJSWebView: React.FC = () => {
         searchBox.marker = true;
         searchBox.mapboxgl = mapboxgl;
         map.addControl(searchBox);
+        const markers = ${JSON.stringify(markers)};
+        markers.forEach(item => {
+          const popupHTML = '<div>' +
+            '<strong>' + item.task.task + '</strong><br>' +
+            'Date: ' + item.task.date + '<br>' +
+            (item.task.distance ? ('Distance: ' + item.task.distance + 'm<br>') : '') +
+            (item.task.category ? ('Catégorie: ' + item.task.category + '<br>') : '') +
+            '<button onclick="handleEdit(\\'' + item.task.id + '\\')">Modifier</button>' +
+            '</div>';
+          new mapboxgl.Marker()
+            .setLngLat(item.coords)
+            .setPopup(new mapboxgl.Popup({ offset: 25 }).setHTML(popupHTML))
+            .addTo(map);
+        });
       });
     </script>
   </body>
@@ -177,7 +253,11 @@ const MapboxGLJSWebView: React.FC = () => {
           onMessage={(event) => {
             try {
               const data = JSON.parse(event.nativeEvent.data);
-              console.log('Map click received:', data);
+              if (data.type === 'editTask' && onEditTask) {
+                onEditTask(data.id);
+              } else {
+                console.log('Message from map:', data);
+              }
             } catch (err) {
               console.error('Error parsing map message:', err);
             }
@@ -188,8 +268,19 @@ const MapboxGLJSWebView: React.FC = () => {
   }
 };
 
-function HomeScreen() {
-  const [tasks, setTasks] = useState<Task[]>([]);
+export default function HomeScreen() {
+  const [recentTasks, setRecentTasks] = useState<Task[]>([]);
+  const [upcomingTasks, setUpcomingTasks] = useState<Task[]>([]);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [taskInput, setTaskInput] = useState('');
+  const [date, setDate] = useState(new Date());
+  const [location, setLocation] = useState('');
+  const [distance, setDistance] = useState('');
+  const [category, setCategory] = useState('Travail');
+  const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+
+  // Import de la navigation expo-router
+  const router = useRouter();
 
   useEffect(() => {
     if (Platform.OS !== 'web') {
@@ -197,48 +288,173 @@ function HomeScreen() {
         tx.executeSql(
           'CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, task TEXT, date TEXT, location TEXT, distance TEXT, category TEXT);',
           [],
-          () => loadTasks(),
-          (error: any) => console.log('Error creating table:', error)
+          () => {
+            loadRecentTasks();
+            loadUpcomingTasks();
+          },
+          (error: any) => console.log('Erreur lors de la création de la table:', error)
         );
       });
     } else {
       const tasksStr = localStorage.getItem('tasks');
-      if (tasksStr) setTasks(JSON.parse(tasksStr));
+      if (tasksStr) {
+        const tasks: Task[] = JSON.parse(tasksStr);
+        filterTasks(tasks);
+      }
     }
   }, []);
 
-  const loadTasks = () => {
-    if (Platform.OS !== 'web') {
-      db.transaction((tx: any) => {
-        tx.executeSql(
-          'SELECT * FROM tasks;',
-          [],
-          (_: any, results: any) => {
-            const loadedTasks: Task[] = [];
-            for (let i = 0; i < results.rows.length; i++) {
-              loadedTasks.push(results.rows.item(i));
-            }
-            setTasks(loadedTasks);
-          },
-          (error: any) => console.log('Error loading tasks:', error)
+  // Récupère les tâches passées ou en cours (date <= maintenant)
+  const loadRecentTasks = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    db.transaction((tx: any) => {
+      tx.executeSql(
+        'SELECT * FROM tasks WHERE date <= ? ORDER BY date DESC;',
+        [today],
+        (_: any, results: any) => {
+          const loaded: Task[] = [];
+          for (let i = 0; i < results.rows.length; i++) {
+            loaded.push(results.rows.item(i));
+          }
+          setRecentTasks(loaded);
+        },
+        (error: any) => console.log('Erreur lors du chargement des tâches récentes:', error)
+      );
+    });
+  };
+
+  // Récupère les tâches futures (date > maintenant)
+  const loadUpcomingTasks = () => {
+    const today = new Date().toISOString().slice(0, 10);
+    db.transaction((tx: any) => {
+      tx.executeSql(
+        'SELECT * FROM tasks WHERE date > ? ORDER BY date ASC;',
+        [today],
+        (_: any, results: any) => {
+          const loaded: Task[] = [];
+          for (let i = 0; i < results.rows.length; i++) {
+            loaded.push(results.rows.item(i));
+          }
+          setUpcomingTasks(loaded);
+        },
+        (error: any) => console.log('Erreur lors du chargement des tâches à venir:', error)
+      );
+    });
+  };
+
+  // Pour le web, filtrer les tâches depuis le localStorage
+  const filterTasks = (tasks: Task[]) => {
+    const now = new Date();
+    const recent = tasks
+      .filter((task) => new Date(task.date) <= now)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+    const upcoming = tasks
+      .filter((task) => new Date(task.date) > now)
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    setRecentTasks(recent);
+    setUpcomingTasks(upcoming);
+  };
+
+  const handleSaveTask = () => {
+    const dateString = date.toISOString();
+    if (!taskInput || !dateString) {
+      alert('Veuillez remplir au moins le titre et la date.');
+      return;
+    }
+    if (editingTaskId) {
+      // Mise à jour
+      if (Platform.OS !== 'web') {
+        db.transaction((tx: any) => {
+          tx.executeSql(
+            'UPDATE tasks SET task=?, date=?, location=?, distance=?, category=? WHERE id=?;',
+            [taskInput, dateString, location, distance, category, editingTaskId],
+            () => {
+              loadRecentTasks();
+              loadUpcomingTasks();
+            },
+            (error: any) => console.log('Erreur lors de la mise à jour:', error)
+          );
+        });
+      } else {
+        const updatedTasks = recentTasks.concat(upcomingTasks).map((t) =>
+          t.id === parseInt(editingTaskId)
+            ? {
+                ...t,
+                task: taskInput,
+                date: dateString,
+                location,
+                distance,
+                category,
+              }
+            : t
         );
-      });
+        localStorage.setItem('tasks', JSON.stringify(updatedTasks));
+        filterTasks(updatedTasks);
+      }
+      setEditingTaskId(null);
     } else {
-      const tasksStr = localStorage.getItem('tasks');
-      if (tasksStr) setTasks(JSON.parse(tasksStr));
+      // Insertion
+      if (Platform.OS !== 'web') {
+        db.transaction((tx: any) => {
+          tx.executeSql(
+            'INSERT INTO tasks (task, date, location, distance, category) VALUES (?,?,?,?,?);',
+            [taskInput, dateString, location, distance, category],
+            () => {
+              loadRecentTasks();
+              loadUpcomingTasks();
+            },
+            (error: any) => console.log("Erreur lors de l'insertion:", error)
+          );
+        });
+      } else {
+        const newTask: Task = {
+          id: Math.floor(Math.random() * 100000),
+          task: taskInput,
+          date: dateString,
+          location,
+          distance,
+          category,
+        };
+        const updatedTasks = [...recentTasks, ...upcomingTasks, newTask];
+        localStorage.setItem('tasks', JSON.stringify(updatedTasks));
+        filterTasks(updatedTasks);
+      }
+    }
+    setTaskInput('');
+    setDate(new Date());
+    setLocation('');
+    setDistance('');
+    setCategory('Travail');
+  };
+
+  // Callback appelé depuis la carte lorsqu'on clique sur "Modifier" dans un popup.
+  const handleEditTaskFromMap = (taskId: string) => {
+    // Rechercher la tâche à éditer
+    const allTasks = [...recentTasks, ...upcomingTasks];
+    const taskToEdit = allTasks.find((t) => t.id.toString() === taskId);
+    if (taskToEdit) {
+      setTaskInput(taskToEdit.task);
+      setDate(new Date(taskToEdit.date));
+      setLocation(taskToEdit.location || '');
+      setDistance(taskToEdit.distance || '');
+      setCategory(taskToEdit.category || 'Travail');
+      setEditingTaskId(taskToEdit.id.toString());
+      setModalVisible(true);
+
+      // Basculer sur l'onglet (ou écran) tasks via expo-router
+      //router.push('/tasks');
+      router.push(`/tasks?editTaskId=${taskToEdit.id.toString()}`);
+
     }
   };
 
-  // Split tasks based on current date
-  const now = new Date();
-  const recentTasks = tasks
-    .filter(task => new Date(task.date) <= now)
-    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-  const upcomingTasks = tasks
-    .filter(task => new Date(task.date) > now)
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
-
-  const TaskItem: React.FC<{ title: string; subtitle: string }> = ({ title, subtitle }) => (
+  // Simple composant pour l'affichage d'une tâche
+  const TaskItem: React.FC<{ title: string; subtitle: string }> = ({
+    title,
+    subtitle,
+  }) => (
     <ThemedView style={styles.taskItem}>
       <ThemedText style={styles.taskTitle}>{title}</ThemedText>
       <ThemedText style={styles.taskSubtitle}>{subtitle}</ThemedText>
@@ -249,7 +465,12 @@ function HomeScreen() {
     <SafeAreaView style={styles.container}>
       <ParallaxScrollView
         headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-        headerImage={<Image source={require('@/assets/images/partial-react-logo.png')} style={styles.reactLogo} />}
+        headerImage={
+          <Image
+            source={require('@/assets/images/partial-react-logo.png')}
+            style={styles.reactLogo}
+          />
+        }
       >
         <LinearGradient colors={['#FF7E5F', '#FEB47B']} style={styles.headerGradient}>
           <ThemedText type="title" style={styles.headerTitle}>
@@ -261,13 +482,17 @@ function HomeScreen() {
         </LinearGradient>
 
         <ThemedView style={styles.sectionContainer}>
-          <ThemedText type="subtitle">Mes tâches récentes</ThemedText>
+          <ThemedText type="subtitle">Mes tâches récemment créées</ThemedText>
           {recentTasks.length === 0 ? (
-            <ThemedText style={styles.emptyText}>Aucune tâche encore ajoutée</ThemedText>
+            <ThemedText style={styles.emptyText}>
+              Aucune tâche encore ajoutée
+            </ThemedText>
           ) : (
             <FlatList
               data={recentTasks}
-              renderItem={({ item }) => <TaskItem title={item.task} subtitle={item.date} />}
+              renderItem={({ item }) => (
+                <TaskItem title={item.task} subtitle={item.date} />
+              )}
               keyExtractor={(item) => item.id.toString()}
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -279,11 +504,16 @@ function HomeScreen() {
         <ThemedView style={styles.sectionContainer}>
           <ThemedText type="subtitle">Tâches à venir</ThemedText>
           {upcomingTasks.length === 0 ? (
-            <ThemedText style={styles.emptyText}>Aucune tâche programmée</ThemedText>
+            <ThemedText style={styles.emptyText}>
+              Aucune tâche programmée. Vérifie que la date de ta tâche est dans
+              le futur.
+            </ThemedText>
           ) : (
             <FlatList
               data={upcomingTasks}
-              renderItem={({ item }) => <TaskItem title={item.task} subtitle={item.date} />}
+              renderItem={({ item }) => (
+                <TaskItem title={item.task} subtitle={item.date} />
+              )}
               keyExtractor={(item) => item.id.toString()}
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -294,18 +524,32 @@ function HomeScreen() {
 
         <ThemedView style={styles.sectionContainer}>
           <ThemedText type="subtitle">Carte des tâches</ThemedText>
-          {/* For both mobile and web, load the Mapbox GL JS map */}
-          <MapboxGLJSWebView />
+          <MapboxGLJSWebView
+            tasks={[...recentTasks, ...upcomingTasks]}
+            onEditTask={handleEditTaskFromMap}
+          />
         </ThemedView>
       </ParallaxScrollView>
 
-      <TouchableOpacity style={styles.floatingButton}>
+      <TouchableOpacity
+        style={styles.floatingButton}
+        onPress={() => {
+          setModalVisible(true);
+          setEditingTaskId(null);
+          setTaskInput('');
+          setDate(new Date());
+          setLocation('');
+          setDistance('');
+          setCategory('Travail');
+        }}
+      >
         <ThemedText style={styles.floatingButtonText}>+</ThemedText>
       </TouchableOpacity>
     </SafeAreaView>
   );
 }
 
+// Styles
 const styles = StyleSheet.create({
   container: { flex: 1 },
   headerGradient: {
@@ -355,5 +599,3 @@ const styles = StyleSheet.create({
   mapContainer: { height: 300, marginTop: 10, marginBottom: 10 },
   map: { flex: 1 },
 });
-
-export default HomeScreen;
