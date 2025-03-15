@@ -1,4 +1,3 @@
-// tasks.tsx
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -10,11 +9,15 @@ import {
   SectionList,
   Platform,
   TextInput,
+  Linking,
+  Button,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Picker } from '@react-native-picker/picker';
 import SQLite from 'react-native-sqlite-storage';
 import { WebView } from 'react-native-webview';
+import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 
 // ***** expo-router *****
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -25,18 +28,51 @@ if (Platform.OS === 'web') {
   WebDatePicker = require('react-datepicker').default;
   require('react-datepicker/dist/react-datepicker.css');
 } else {
-  // Sur mobile, on utilise react-native-date-picker
-  // npm install react-native-date-picker
-  // cd ios && pod install (si iOS)
   var DatePickerMobile = require('react-native-date-picker').default;
 }
 
-// ***** Type(s) et interface(s) *****
+// Configuration des notifications
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: false,
+    shouldSetBadge: false,
+  }),
+});
+
+async function registerForPushNotificationsAsync() {
+  if (Constants.isDevice) {
+    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    let finalStatus = existingStatus;
+    if (existingStatus !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+    if (finalStatus !== 'granted') {
+      Alert.alert('Permission requise', 'Impossible d’obtenir l’autorisation pour les notifications push.');
+      return;
+    }
+  } else {
+    Alert.alert('Attention', 'Les notifications push nécessitent un appareil physique.');
+  }
+}
+
+async function scheduleConfirmationNotification() {
+  await Notifications.scheduleNotificationAsync({
+    content: {
+      title: 'Tâche créée',
+      body: 'Votre tâche a bien été enregistrée !',
+    },
+    trigger: null,
+  });
+}
+
+// ***** Types et interfaces *****
 interface Task {
   id: string | number;
   task: string;
-  date: string;        // Stocké en string dans la DB
-  location?: string;   // JSON string: [longitude, latitude]
+  date: string;
+  location?: string;
   distance?: string;
   category: string;
 }
@@ -52,9 +88,7 @@ interface MapboxGLJSSelectorProps {
   onLocationSelect: (coords: number[]) => void;
 }
 
-const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({
-  onLocationSelect,
-}) => {
+const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelect }) => {
   const MAPBOX_ACCESS_TOKEN =
     'pk.eyJ1IjoibWFwcHltYWFuaWFjIiwiYSI6ImNtODFuZ3AxejEyZmUycnM1MHFpazN0OXQifQ.Y_6RTH2rn8M1QOgSHEQhJg';
 
@@ -99,7 +133,6 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({
         }
       }
 
-      // Injection du CSS + JS si pas déjà présent
       if (!document.getElementById('mapbox-gl-css')) {
         console.log('[MapboxGLJSSelector] injecting mapbox-gl CSS');
         const link = document.createElement('link');
@@ -139,16 +172,10 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({
     }, [MAPBOX_ACCESS_TOKEN, onLocationSelect]);
 
     return (
-      <div
-        ref={containerRef}
-        style={{ height: 300, marginTop: 10, marginBottom: 10 }}
-      />
+      <div ref={containerRef} style={{ height: 300, marginTop: 10, marginBottom: 10 }} />
     );
-  }
-
-  // Mobile
-  console.log('[MapboxGLJSSelector] -> using WebView for mobile');
-  const htmlContent = `
+  } else {
+    const htmlContent = `
 <!DOCTYPE html>
 <html>
   <head>
@@ -203,37 +230,31 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({
     </script>
   </body>
 </html>
-  `;
-
-  return (
-    <View style={selectorStyles.container}>
-      <WebView
-        originWhitelist={['*']}
-        source={{ html: htmlContent }}
-        style={selectorStyles.webview}
-        onMessage={(event) => {
-          try {
-            const data = JSON.parse(event.nativeEvent.data);
-            console.log('[MapboxGLJSSelector] Received coords from mobile:', data);
-            onLocationSelect([data.longitude, data.latitude]);
-          } catch (err) {
-            console.error('Error parsing message from WebView:', err);
-          }
-        }}
-      />
-    </View>
-  );
+    `;
+    return (
+      <View style={selectorStyles.container}>
+        <WebView
+          originWhitelist={['*']}
+          source={{ html: htmlContent }}
+          style={selectorStyles.webview}
+          onMessage={(event) => {
+            try {
+              const data = JSON.parse(event.nativeEvent.data);
+              console.log('[MapboxGLJSSelector] Received coords from mobile:', data);
+              onLocationSelect([data.longitude, data.latitude]);
+            } catch (err) {
+              console.error('Error parsing message from WebView:', err);
+            }
+          }}
+        />
+      </View>
+    );
+  }
 };
 
 const selectorStyles = StyleSheet.create({
-  container: {
-    height: 300,
-    marginTop: 10,
-    marginBottom: 10,
-  },
-  webview: {
-    flex: 1,
-  },
+  container: { height: 300, marginTop: 10, marginBottom: 10 },
+  webview: { flex: 1 },
 });
 
 // ===========================
@@ -242,28 +263,49 @@ const selectorStyles = StyleSheet.create({
 export default function TasksScreen() {
   console.log('[TasksScreen] RENDER');
 
-  // État pour la liste de tâches
   const [tasks, setTasks] = useState<Task[]>([]);
-  // État du modal
   const [modalVisible, setModalVisible] = useState(false);
-
-  // État du datePicker
   const [date, setDate] = useState<Date>(new Date());
-
-  // Champs du formulaire
   const [taskInput, setTaskInput] = useState('');
   const [location, setLocation] = useState('');
   const [distance, setDistance] = useState('');
   const [category, setCategory] = useState('Travail');
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  const [flyToCoords, setFlyToCoords] = useState<[number, number] | null>(null);
+  const [notifStatus, setNotifStatus] = useState<string | null>(null);
 
-  // expo-router
   const { editTaskId } = useLocalSearchParams();
   const router = useRouter();
 
   console.log('[TasksScreen] editTaskId =', editTaskId);
 
-  // ***** Créer la table et charger les tâches *****
+  useEffect(() => {
+    registerForPushNotificationsAsync();
+  }, []);
+
+  useEffect(() => {
+    async function checkNotifPermissions() {
+      const { status } = await Notifications.getPermissionsAsync();
+      setNotifStatus(status);
+    }
+    checkNotifPermissions();
+  }, []);
+
+  const handleActivateNotifications = async () => {
+    const { status } = await Notifications.requestPermissionsAsync();
+    setNotifStatus(status);
+    if (status !== 'granted') {
+      Alert.alert(
+        "Permission non accordée",
+        "Pour activer les notifications, veuillez vous rendre dans les paramètres.",
+        [
+          { text: "Ouvrir les paramètres", onPress: () => Linking.openSettings() },
+          { text: "Annuler", style: 'cancel' }
+        ]
+      );
+    }
+  };
+
   useEffect(() => {
     console.log('[TasksScreen] useEffect -> create table + load tasks');
     if (Platform.OS !== 'web') {
@@ -280,7 +322,6 @@ export default function TasksScreen() {
     }
   }, []);
 
-  // ***** Charger les tâches *****
   const loadTasks = () => {
     console.log('[TasksScreen] loadTasks called');
     if (Platform.OS !== 'web') {
@@ -316,7 +357,6 @@ export default function TasksScreen() {
     }
   };
 
-  // ***** Ouvrir automatiquement la pop-up si editTaskId est passé *****
   useEffect(() => {
     console.log('[TasksScreen] useEffect -> checking editTaskId and tasks');
     console.log('[TasksScreen] tasks =', tasks);
@@ -341,7 +381,6 @@ export default function TasksScreen() {
     }
   }, [editTaskId, tasks]);
 
-  // ***** Sauvegarde en AsyncStorage *****
   const saveTasksToAsyncStorage = async (updatedTasks: Task[]) => {
     try {
       await AsyncStorage.setItem('tasks', JSON.stringify(updatedTasks));
@@ -351,16 +390,13 @@ export default function TasksScreen() {
     }
   };
 
-  // ***** Fermer le modal + enlever editTaskId de l'URL *****
   const closeModal = () => {
     console.log('[TasksScreen] closeModal called');
     setModalVisible(false);
     setEditingTaskId(null);
-    // On retire le paramètre en remplaçant l'URL par /tasks
     router.replace('/tasks');
   };
 
-  // ***** Créer ou mettre à jour une tâche *****
   const handleSaveTask = () => {
     console.log('[TasksScreen] handleSaveTask called');
     const dateString = date.toISOString();
@@ -378,6 +414,7 @@ export default function TasksScreen() {
             () => {
               console.log('[TasksScreen] updated task in SQLite -> reloading tasks');
               loadTasks();
+              scheduleConfirmationNotification();
             },
             (error: any) => console.log('Error updating task in SQLite:', error)
           );
@@ -397,6 +434,7 @@ export default function TasksScreen() {
         );
         setTasks(updatedTasks);
         saveTasksToAsyncStorage(updatedTasks);
+        scheduleConfirmationNotification();
       }
       setEditingTaskId(null);
     } else {
@@ -406,11 +444,12 @@ export default function TasksScreen() {
           tx.executeSql(
             'INSERT INTO tasks (task, date, location, distance, category) VALUES (?,?,?,?,?);',
             [taskInput, dateString, location, distance, category],
-            () => {
-              console.log('[TasksScreen] inserted new task in SQLite -> reloading tasks');
+            (tx: any, result: any) => {
+              console.log('[TasksScreen] Task added successfully in SQLite with id:', result.insertId);
               loadTasks();
+              scheduleConfirmationNotification();
             },
-            (error: any) => console.log('Error inserting task in SQLite:', error)
+            (error: any) => console.log("Erreur lors de l'insertion:", error)
           );
         });
       } else {
@@ -425,9 +464,9 @@ export default function TasksScreen() {
         const updatedTasks = [...tasks, newTask];
         setTasks(updatedTasks);
         saveTasksToAsyncStorage(updatedTasks);
+        scheduleConfirmationNotification();
       }
     }
-    // Reset et fermeture
     setTaskInput('');
     setDate(new Date());
     setLocation('');
@@ -436,7 +475,6 @@ export default function TasksScreen() {
     closeModal();
   };
 
-  // ***** Supprimer une tâche *****
   const handleDeleteTask = (id: string | number) => {
     console.log('[TasksScreen] handleDeleteTask -> id=', id);
     if (Platform.OS !== 'web') {
@@ -458,7 +496,6 @@ export default function TasksScreen() {
     }
   };
 
-  // ***** Éditer une tâche localement (bouton "Modifier") *****
   const handleEditTask = (id: string | number) => {
     console.log('[TasksScreen] handleEditTask -> id=', id);
     const taskToEdit = tasks.find((t) => t.id === id);
@@ -476,7 +513,6 @@ export default function TasksScreen() {
     }
   };
 
-  // ***** Tri par catégorie *****
   const sortTasksByCategory = () => {
     const sorted: { [key: string]: Task[] } = {};
     tasks.forEach((t) => {
@@ -492,7 +528,6 @@ export default function TasksScreen() {
     }));
   };
 
-  // ***** Rendu d'une tâche *****
   const renderTaskItem = ({ item }: { item: Task }) => (
     <View style={styles.taskItem}>
       <Text style={styles.taskText}>Tâche: {item.task}</Text>
@@ -520,10 +555,19 @@ export default function TasksScreen() {
     </View>
   );
 
-  // ***** Rendu principal *****
   return (
     <View style={styles.container}>
       <Text style={styles.header}>Gestion des Tâches</Text>
+
+      {/* Section pour afficher l'état des notifications et activer si nécessaire */}
+      <View style={styles.notifContainer}>
+        <Text style={styles.notifStatusText}>
+          Notifications : {notifStatus || 'inconnu'}
+        </Text>
+        {notifStatus !== 'granted' && (
+          <Button title="Activate Notifications" onPress={handleActivateNotifications} />
+        )}
+      </View>
 
       <TouchableOpacity
         style={styles.addButton}
@@ -563,7 +607,6 @@ export default function TasksScreen() {
               {editingTaskId ? 'Modifier la tâche' : 'Nouvelle Tâche'}
             </Text>
 
-            {/* Titre de la tâche */}
             <TextInput
               style={styles.modalInput}
               placeholder="Titre de la tâche"
@@ -574,7 +617,6 @@ export default function TasksScreen() {
               }}
             />
 
-            {/* Date Picker (web vs mobile) */}
             {Platform.OS === 'web' ? (
               <WebDatePicker
                 selected={date}
@@ -599,7 +641,6 @@ export default function TasksScreen() {
               />
             )}
 
-            {/* Emplacement (facultatif) */}
             <TextInput
               style={styles.modalInput}
               placeholder="Emplacement (optionnel)"
@@ -610,7 +651,6 @@ export default function TasksScreen() {
               }}
             />
 
-            {/* Distance (facultatif) */}
             <TextInput
               style={styles.modalInput}
               placeholder="Distance (optionnel)"
@@ -622,7 +662,6 @@ export default function TasksScreen() {
               keyboardType="numeric"
             />
 
-            {/* Catégorie */}
             <Picker
               selectedValue={category}
               style={styles.picker}
@@ -636,7 +675,6 @@ export default function TasksScreen() {
               <Picker.Item label="Divers" value="Divers" />
             </Picker>
 
-            {/* Composant Mapbox pour sélectionner la position */}
             <MapboxGLJSSelector
               onLocationSelect={(coords) => {
                 console.log('[TasksScreen] onLocationSelect from Mapbox ->', coords);
@@ -650,10 +688,7 @@ export default function TasksScreen() {
                   {editingTaskId ? 'Modifier' : 'Ajouter'}
                 </Text>
               </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.modalButton, styles.cancelButton]}
-                onPress={closeModal}
-              >
+              <TouchableOpacity style={[styles.modalButton, styles.cancelButton]} onPress={closeModal}>
                 <Text style={styles.modalButtonText}>Annuler</Text>
               </TouchableOpacity>
             </View>
@@ -664,102 +699,28 @@ export default function TasksScreen() {
   );
 }
 
-// ***** Styles *****
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 20, backgroundColor: '#f0f0f0' },
-  header: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    textAlign: 'center',
-    marginTop: 20,
-    marginBottom: 20,
-  },
-  addButton: {
-    backgroundColor: '#4CAF50',
-    padding: 15,
-    borderRadius: 8,
-    alignItems: 'center',
-    marginBottom: 20,
-  },
+  notifContainer: { padding: 10, backgroundColor: '#eee', alignItems: 'center' },
+  notifStatusText: { fontSize: 16, marginBottom: 5 },
+  header: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginTop: 20, marginBottom: 20 },
+  addButton: { backgroundColor: '#4CAF50', padding: 15, borderRadius: 8, alignItems: 'center', marginBottom: 20 },
   addButtonText: { color: '#fff', fontSize: 18 },
-  sectionHeader: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    backgroundColor: '#eee',
-    padding: 5,
-    marginTop: 15,
-  },
-  taskItem: {
-    backgroundColor: '#fff',
-    padding: 15,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ccc',
-    marginBottom: 10,
-  },
+  sectionHeader: { fontSize: 18, fontWeight: 'bold', backgroundColor: '#eee', padding: 5, marginTop: 15 },
+  taskItem: { backgroundColor: '#fff', padding: 15, borderRadius: 8, borderWidth: 1, borderColor: '#ccc', marginBottom: 10 },
   taskText: { fontSize: 16, marginBottom: 5 },
-  buttonContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 10,
-  },
-  editButton: {
-    flex: 0.48,
-    padding: 10,
-    backgroundColor: 'orange',
-    borderRadius: 5,
-    alignItems: 'center',
-  },
+  buttonContainer: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
+  editButton: { flex: 0.48, padding: 10, backgroundColor: 'orange', borderRadius: 5, alignItems: 'center' },
   editButtonText: { color: '#fff', fontSize: 16 },
-  deleteButton: {
-    flex: 0.48,
-    padding: 10,
-    backgroundColor: 'red',
-    borderRadius: 5,
-    alignItems: 'center',
-  },
+  deleteButton: { flex: 0.48, padding: 10, backgroundColor: 'red', borderRadius: 5, alignItems: 'center' },
   deleteButtonText: { color: '#fff', fontSize: 16 },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContainer: {
-    width: '90%',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 20,
-  },
-  modalTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    marginBottom: 15,
-    textAlign: 'center',
-    color: '#333',
-  },
-  modalInput: {
-    backgroundColor: '#f9f9f9',
-    height: 45,
-    borderColor: '#ddd',
-    borderWidth: 1,
-    borderRadius: 8,
-    marginBottom: 15,
-    paddingHorizontal: 15,
-  },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
+  modalContainer: { width: '90%', backgroundColor: '#fff', borderRadius: 12, padding: 20 },
+  modalTitle: { fontSize: 24, fontWeight: '700', marginBottom: 15, textAlign: 'center', color: '#333' },
+  modalInput: { backgroundColor: '#f9f9f9', height: 45, borderColor: '#ddd', borderWidth: 1, borderRadius: 8, marginBottom: 15, paddingHorizontal: 15 },
   picker: { height: 50, width: '100%', marginBottom: 15 },
-  modalButtonContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  modalButton: {
-    flex: 1,
-    backgroundColor: '#4CAF50',
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginHorizontal: 5,
-    alignItems: 'center',
-  },
+  modalButtonContainer: { flexDirection: 'row', justifyContent: 'space-between' },
+  modalButton: { flex: 1, backgroundColor: '#4CAF50', paddingVertical: 12, borderRadius: 8, marginHorizontal: 5, alignItems: 'center' },
   cancelButton: { backgroundColor: '#F44336' },
   modalButtonText: { color: '#fff', fontSize: 18, fontWeight: '600' },
 });

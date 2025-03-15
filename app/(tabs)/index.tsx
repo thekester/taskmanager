@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
   Image,
   StyleSheet,
@@ -7,11 +7,16 @@ import {
   TouchableOpacity,
   Platform,
   View,
+  Text,
+  Button,
+  Alert,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import SQLite from 'react-native-sqlite-storage';
+import * as Notifications from 'expo-notifications';
+import * as Linking from 'expo-linking';
 
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -41,16 +46,15 @@ if (Platform.OS !== 'web') {
 interface MapboxGLJSWebViewProps {
   tasks?: Task[];
   onEditTask?: (taskId: string) => void;
+  // Nouvelle prop pour faire flyTo
+  flyToCoords?: [number, number] | null;
 }
 
-/**
- * MapboxGLJSWebView Component
- *
- * - Sur web : injecte les scripts/CSS Mapbox dans un div et ajoute un popup à chaque marqueur.
- * - Sur mobile : charge une WebView contenant le code HTML de la carte. Le HTML injecte les marqueurs
- *   avec un popup incluant un bouton qui, lorsqu'il est cliqué, appelle window.handleEdit.
- */
-const MapboxGLJSWebView: React.FC<MapboxGLJSWebViewProps> = ({ tasks = [], onEditTask }) => {
+const MapboxGLJSWebView: React.FC<MapboxGLJSWebViewProps> = ({
+  tasks = [],
+  onEditTask,
+  flyToCoords = null,
+}) => {
   const MAPBOX_ACCESS_TOKEN =
     'pk.eyJ1IjoibWFwcHltYWFuaWFjIiwiYSI6ImNtODFuZ3AxejEyZmUycnM1MHFpazN0OXQifQ.Y_6RTH2rn8M1QOgSHEQhJg';
 
@@ -65,8 +69,12 @@ const MapboxGLJSWebView: React.FC<MapboxGLJSWebViewProps> = ({ tasks = [], onEdi
 
   const markers = extractMarkers();
   const mapContainer = useRef<HTMLDivElement>(null);
+  // Référence pour stocker l'instance de la carte (web)
+  const mapRef = useRef<any>(null);
+  // Référence pour la WebView (mobile)
+  const webviewRef = useRef<WebView>(null);
 
-  // Web
+  // Version Web
   if (Platform.OS === 'web') {
     useEffect(() => {
       function initializeMap() {
@@ -78,6 +86,7 @@ const MapboxGLJSWebView: React.FC<MapboxGLJSWebViewProps> = ({ tasks = [], onEdi
             center: [-74.5, 40],
             zoom: 9,
           });
+          mapRef.current = map;
           map.addControl(new window.mapboxgl.NavigationControl());
 
           map.on('load', () => {
@@ -93,7 +102,7 @@ const MapboxGLJSWebView: React.FC<MapboxGLJSWebViewProps> = ({ tasks = [], onEdi
               map.addControl(searchBox);
             }
 
-            // Définition de la fonction globale pour l'édition (appelée par onclick)
+            // Fonction globale pour l'édition (appelée par onclick)
             (window as any).handleEdit = function (taskId: string) {
               if (onEditTask) {
                 onEditTask(taskId);
@@ -110,14 +119,10 @@ const MapboxGLJSWebView: React.FC<MapboxGLJSWebViewProps> = ({ tasks = [], onEdi
                   <strong>${task.task}</strong><br>
                   Date: ${task.date}<br>
                   ${
-                    task.distance
-                      ? 'Distance: ' + task.distance + 'm<br>'
-                      : ''
+                    task.distance ? 'Distance: ' + task.distance + 'm<br>' : ''
                   }
                   ${
-                    task.category
-                      ? 'Catégorie: ' + task.category + '<br>'
-                      : ''
+                    task.category ? 'Catégorie: ' + task.category + '<br>' : ''
                   }
                   <button onclick="handleEdit('${task.id}')">Modifier</button>
                 </div>
@@ -168,6 +173,17 @@ const MapboxGLJSWebView: React.FC<MapboxGLJSWebViewProps> = ({ tasks = [], onEdi
       }
     }, [MAPBOX_ACCESS_TOKEN, tasks, onEditTask]);
 
+    // Fly-to si flyToCoords change
+    useEffect(() => {
+      if (flyToCoords && mapRef.current) {
+        mapRef.current.flyTo({
+          center: flyToCoords,
+          zoom: 14,
+          essential: true,
+        });
+      }
+    }, [flyToCoords]);
+
     return (
       <div
         ref={mapContainer}
@@ -175,7 +191,7 @@ const MapboxGLJSWebView: React.FC<MapboxGLJSWebViewProps> = ({ tasks = [], onEdi
       />
     );
   }
-  // Mobile
+  // Version Mobile via WebView
   else {
     const htmlContent = `
 <!DOCTYPE html>
@@ -203,6 +219,7 @@ const MapboxGLJSWebView: React.FC<MapboxGLJSWebViewProps> = ({ tasks = [], onEdi
         center: [-74.5, 40],
         zoom: 9
       });
+      window.map = map;
       map.addControl(new mapboxgl.NavigationControl());
       map.on('click', (e) => {
         const lngLat = e.lngLat;
@@ -240,13 +257,44 @@ const MapboxGLJSWebView: React.FC<MapboxGLJSWebViewProps> = ({ tasks = [], onEdi
             .addTo(map);
         });
       });
+      // Écoute des messages pour flyTo depuis React Native
+      document.addEventListener("message", function(event) {
+        try {
+          const data = JSON.parse(event.data);
+          if(data.type === 'flyTo' && data.coords){
+            map.flyTo({
+              center: data.coords,
+              zoom: 14,
+              essential: true
+            });
+          }
+        } catch(e){
+          console.error('Erreur lors du traitement du message:', e);
+        }
+      });
     </script>
   </body>
 </html>
     `;
+    // Injection du flyTo dans la WebView
+    useEffect(() => {
+      if (flyToCoords && webviewRef.current) {
+        const jsCode = `
+          map.flyTo({
+            center: [${flyToCoords[0]}, ${flyToCoords[1]}],
+            zoom: 14,
+            essential: true
+          });
+          true;
+        `;
+        webviewRef.current.injectJavaScript(jsCode);
+      }
+    }, [flyToCoords]);
+
     return (
       <View style={styles.mapContainer}>
         <WebView
+          ref={webviewRef}
           originWhitelist={['*']}
           source={{ html: htmlContent }}
           style={styles.map}
@@ -278,33 +326,39 @@ export default function HomeScreen() {
   const [distance, setDistance] = useState('');
   const [category, setCategory] = useState('Travail');
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
+  // Nouvelle state pour flyTo (coordonnées)
+  const [flyToCoords, setFlyToCoords] = useState<[number, number] | null>(null);
+  // State pour vérifier l'état des notifications
+  const [notifStatus, setNotifStatus] = useState<string | null>(null);
 
-  // Import de la navigation expo-router
   const router = useRouter();
 
+  // Vérifier l'état des permissions de notifications au montage
   useEffect(() => {
-    if (Platform.OS !== 'web') {
-      db.transaction((tx: any) => {
-        tx.executeSql(
-          'CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, task TEXT, date TEXT, location TEXT, distance TEXT, category TEXT);',
-          [],
-          () => {
-            loadRecentTasks();
-            loadUpcomingTasks();
-          },
-          (error: any) => console.log('Erreur lors de la création de la table:', error)
-        );
-      });
-    } else {
-      const tasksStr = localStorage.getItem('tasks');
-      if (tasksStr) {
-        const tasks: Task[] = JSON.parse(tasksStr);
-        filterTasks(tasks);
-      }
+    async function checkNotifPermissions() {
+      const { status } = await Notifications.getPermissionsAsync();
+      setNotifStatus(status);
     }
+    checkNotifPermissions();
   }, []);
 
-  // Récupère les tâches passées ou en cours (date <= maintenant)
+  // Fonction pour activer les notifications
+  const handleActivateNotifications = async () => {
+    const { status } = await Notifications.requestPermissionsAsync();
+    setNotifStatus(status);
+    if (status !== 'granted') {
+      Alert.alert(
+        "Permission non accordée",
+        "Pour activer les notifications, veuillez vous rendre dans les paramètres.",
+        [
+          { text: "Ouvrir les paramètres", onPress: () => Linking.openSettings() },
+          { text: "Annuler", style: 'cancel' }
+        ]
+      );
+    }
+  };
+
+  // Chargement initial ou depuis le focus
   const loadRecentTasks = () => {
     const today = new Date().toISOString().slice(0, 10);
     db.transaction((tx: any) => {
@@ -318,12 +372,12 @@ export default function HomeScreen() {
           }
           setRecentTasks(loaded);
         },
-        (error: any) => console.log('Erreur lors du chargement des tâches récentes:', error)
+        (error: any) =>
+          console.log('Erreur lors du chargement des tâches récentes:', error)
       );
     });
   };
 
-  // Récupère les tâches futures (date > maintenant)
   const loadUpcomingTasks = () => {
     const today = new Date().toISOString().slice(0, 10);
     db.transaction((tx: any) => {
@@ -337,12 +391,12 @@ export default function HomeScreen() {
           }
           setUpcomingTasks(loaded);
         },
-        (error: any) => console.log('Erreur lors du chargement des tâches à venir:', error)
+        (error: any) =>
+          console.log('Erreur lors du chargement des tâches à venir:', error)
       );
     });
   };
 
-  // Pour le web, filtrer les tâches depuis le localStorage
   const filterTasks = (tasks: Task[]) => {
     const now = new Date();
     const recent = tasks
@@ -357,6 +411,22 @@ export default function HomeScreen() {
     setUpcomingTasks(upcoming);
   };
 
+  // useFocusEffect pour recharger les tâches à chaque focus de l'écran
+  useFocusEffect(
+    useCallback(() => {
+      if (Platform.OS !== 'web') {
+        loadRecentTasks();
+        loadUpcomingTasks();
+      } else {
+        const tasksStr = localStorage.getItem('tasks');
+        if (tasksStr) {
+          const tasks: Task[] = JSON.parse(tasksStr);
+          filterTasks(tasks);
+        }
+      }
+    }, [])
+  );
+
   const handleSaveTask = () => {
     const dateString = date.toISOString();
     if (!taskInput || !dateString) {
@@ -364,7 +434,6 @@ export default function HomeScreen() {
       return;
     }
     if (editingTaskId) {
-      // Mise à jour
       if (Platform.OS !== 'web') {
         db.transaction((tx: any) => {
           tx.executeSql(
@@ -374,7 +443,8 @@ export default function HomeScreen() {
               loadRecentTasks();
               loadUpcomingTasks();
             },
-            (error: any) => console.log('Erreur lors de la mise à jour:', error)
+            (error: any) =>
+              console.log('Erreur lors de la mise à jour:', error)
           );
         });
       } else {
@@ -395,17 +465,18 @@ export default function HomeScreen() {
       }
       setEditingTaskId(null);
     } else {
-      // Insertion
       if (Platform.OS !== 'web') {
         db.transaction((tx: any) => {
           tx.executeSql(
             'INSERT INTO tasks (task, date, location, distance, category) VALUES (?,?,?,?,?);',
             [taskInput, dateString, location, distance, category],
-            () => {
+            (tx: any, result: any) => {
+              console.log('[TasksScreen] Task added successfully in SQLite with id:', result.insertId);
               loadRecentTasks();
               loadUpcomingTasks();
             },
-            (error: any) => console.log("Erreur lors de l'insertion:", error)
+            (error: any) =>
+              console.log("Erreur lors de l'insertion:", error)
           );
         });
       } else {
@@ -420,6 +491,7 @@ export default function HomeScreen() {
         const updatedTasks = [...recentTasks, ...upcomingTasks, newTask];
         localStorage.setItem('tasks', JSON.stringify(updatedTasks));
         filterTasks(updatedTasks);
+        console.log('[TasksScreen] Task added successfully in localStorage');
       }
     }
     setTaskInput('');
@@ -429,9 +501,8 @@ export default function HomeScreen() {
     setCategory('Travail');
   };
 
-  // Callback appelé depuis la carte lorsqu'on clique sur "Modifier" dans un popup.
+  // Pour l'édition depuis la carte
   const handleEditTaskFromMap = (taskId: string) => {
-    // Rechercher la tâche à éditer
     const allTasks = [...recentTasks, ...upcomingTasks];
     const taskToEdit = allTasks.find((t) => t.id.toString() === taskId);
     if (taskToEdit) {
@@ -442,27 +513,48 @@ export default function HomeScreen() {
       setCategory(taskToEdit.category || 'Travail');
       setEditingTaskId(taskToEdit.id.toString());
       setModalVisible(true);
-
-      // Basculer sur l'onglet (ou écran) tasks via expo-router
-      //router.push('/tasks');
       router.push(`/tasks?editTaskId=${taskToEdit.id.toString()}`);
-
     }
   };
 
-  // Simple composant pour l'affichage d'une tâche
-  const TaskItem: React.FC<{ title: string; subtitle: string }> = ({
-    title,
-    subtitle,
-  }) => (
+  // Fonction pour recentrer la carte sur les coordonnées d'une tâche
+  const handleViewOnMap = (coords: [number, number]) => {
+    setFlyToCoords(coords);
+    // Vous pouvez ajouter ici un scroll ou une navigation vers la section carte si nécessaire
+  };
+
+  // Composant pour afficher une tâche avec le bouton "View on Map" si la tâche possède une localisation
+  const TaskItem: React.FC<{ task: Task }> = ({ task }) => (
     <ThemedView style={styles.taskItem}>
-      <ThemedText style={styles.taskTitle}>{title}</ThemedText>
-      <ThemedText style={styles.taskSubtitle}>{subtitle}</ThemedText>
+      <ThemedText style={styles.taskTitle}>{task.task}</ThemedText>
+      <ThemedText style={styles.taskSubtitle}>{task.date}</ThemedText>
+      {task.location && task.location.trim() !== '' && (
+        <TouchableOpacity
+          onPress={() => {
+            if (task.location) {
+              const coords = JSON.parse(task.location);
+              handleViewOnMap(coords);
+            }
+          }}
+        >
+          <ThemedText style={{ color: 'blue', marginTop: 8 }}>View on Map</ThemedText>
+        </TouchableOpacity>
+      )}
     </ThemedView>
   );
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Section pour afficher l'état des notifications et activer si nécessaire */}
+      <View style={styles.notifContainer}>
+        <Text style={styles.notifStatusText}>
+          Notifications : {notifStatus || 'inconnu'}
+        </Text>
+        {notifStatus !== 'granted' && (
+          <Button title="Activate Notifications" onPress={handleActivateNotifications} />
+        )}
+      </View>
+
       <ParallaxScrollView
         headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
         headerImage={
@@ -490,9 +582,7 @@ export default function HomeScreen() {
           ) : (
             <FlatList
               data={recentTasks}
-              renderItem={({ item }) => (
-                <TaskItem title={item.task} subtitle={item.date} />
-              )}
+              renderItem={({ item }) => <TaskItem task={item} />}
               keyExtractor={(item) => item.id.toString()}
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -505,15 +595,12 @@ export default function HomeScreen() {
           <ThemedText type="subtitle">Tâches à venir</ThemedText>
           {upcomingTasks.length === 0 ? (
             <ThemedText style={styles.emptyText}>
-              Aucune tâche programmée. Vérifie que la date de ta tâche est dans
-              le futur.
+              Aucune tâche programmée. Vérifie que la date de ta tâche est dans le futur.
             </ThemedText>
           ) : (
             <FlatList
               data={upcomingTasks}
-              renderItem={({ item }) => (
-                <TaskItem title={item.task} subtitle={item.date} />
-              )}
+              renderItem={({ item }) => <TaskItem task={item} />}
               keyExtractor={(item) => item.id.toString()}
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -527,6 +614,7 @@ export default function HomeScreen() {
           <MapboxGLJSWebView
             tasks={[...recentTasks, ...upcomingTasks]}
             onEditTask={handleEditTaskFromMap}
+            flyToCoords={flyToCoords}
           />
         </ThemedView>
       </ParallaxScrollView>
@@ -549,9 +637,17 @@ export default function HomeScreen() {
   );
 }
 
-// Styles
 const styles = StyleSheet.create({
   container: { flex: 1 },
+  notifContainer: {
+    padding: 10,
+    backgroundColor: '#eee',
+    alignItems: 'center',
+  },
+  notifStatusText: {
+    fontSize: 16,
+    marginBottom: 5,
+  },
   headerGradient: {
     padding: 20,
     alignItems: 'center',
