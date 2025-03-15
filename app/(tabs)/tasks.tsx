@@ -28,6 +28,7 @@ if (Platform.OS === 'web') {
   WebDatePicker = require('react-datepicker').default;
   require('react-datepicker/dist/react-datepicker.css');
 } else {
+  // Sur mobile, on utilise react-native-date-picker
   var DatePickerMobile = require('react-native-date-picker').default;
 }
 
@@ -40,6 +41,7 @@ Notifications.setNotificationHandler({
   }),
 });
 
+// Pour les notifications natives
 async function registerForPushNotificationsAsync() {
   if (Constants.isDevice) {
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
@@ -57,14 +59,34 @@ async function registerForPushNotificationsAsync() {
   }
 }
 
+// Fonction hybride pour planifier une notification de confirmation
 async function scheduleConfirmationNotification() {
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title: 'Tâche créée',
-      body: 'Votre tâche a bien été enregistrée !',
-    },
-    trigger: null,
-  });
+  if (Platform.OS === 'web') {
+    // Utilisation de l'API Web Notification
+    if ('Notification' in window) {
+      if (Notification.permission === 'granted') {
+        new Notification('Tâche créée', {
+          body: 'Votre tâche a bien été enregistrée !',
+        });
+      } else if (Notification.permission !== 'denied') {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          new Notification('Tâche créée', {
+            body: 'Votre tâche a bien été enregistrée !',
+          });
+        }
+      }
+    }
+  } else {
+    // Notification native avec expo-notifications
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: 'Tâche créée',
+        body: 'Votre tâche a bien été enregistrée !',
+      },
+      trigger: null,
+    });
+  }
 }
 
 // ***** Types et interfaces *****
@@ -171,9 +193,7 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
       }
     }, [MAPBOX_ACCESS_TOKEN, onLocationSelect]);
 
-    return (
-      <div ref={containerRef} style={{ height: 300, marginTop: 10, marginBottom: 10 }} />
-    );
+    return <div ref={containerRef} style={{ height: 300, marginTop: 10, marginBottom: 10 }} />;
   } else {
     const htmlContent = `
 <!DOCTYPE html>
@@ -279,10 +299,12 @@ export default function TasksScreen() {
 
   console.log('[TasksScreen] editTaskId =', editTaskId);
 
+  // Demander les permissions de notifications au montage (pour natives)
   useEffect(() => {
     registerForPushNotificationsAsync();
   }, []);
 
+  // Vérifier l'état des permissions de notifications
   useEffect(() => {
     async function checkNotifPermissions() {
       const { status } = await Notifications.getPermissionsAsync();
@@ -532,23 +554,13 @@ export default function TasksScreen() {
     <View style={styles.taskItem}>
       <Text style={styles.taskText}>Tâche: {item.task}</Text>
       <Text style={styles.taskText}>Date: {item.date}</Text>
-      {item.location ? (
-        <Text style={styles.taskText}>Lieu: {item.location}</Text>
-      ) : null}
-      {item.distance ? (
-        <Text style={styles.taskText}>Distance: {item.distance}m</Text>
-      ) : null}
+      {item.location ? <Text style={styles.taskText}>Lieu: {item.location}</Text> : null}
+      {item.distance ? <Text style={styles.taskText}>Distance: {item.distance}m</Text> : null}
       <View style={styles.buttonContainer}>
-        <TouchableOpacity
-          style={styles.editButton}
-          onPress={() => handleEditTask(item.id)}
-        >
+        <TouchableOpacity style={styles.editButton} onPress={() => handleEditTask(item.id)}>
           <Text style={styles.editButtonText}>Modifier</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.deleteButton}
-          onPress={() => handleDeleteTask(item.id)}
-        >
+        <TouchableOpacity style={styles.deleteButton} onPress={() => handleDeleteTask(item.id)}>
           <Text style={styles.deleteButtonText}>Supprimer</Text>
         </TouchableOpacity>
       </View>
@@ -559,7 +571,7 @@ export default function TasksScreen() {
     <View style={styles.container}>
       <Text style={styles.header}>Gestion des Tâches</Text>
 
-      {/* Section pour afficher l'état des notifications et activer si nécessaire */}
+      {/* Section pour l'état des notifications et activation */}
       <View style={styles.notifContainer}>
         <Text style={styles.notifStatusText}>
           Notifications : {notifStatus || 'inconnu'}
