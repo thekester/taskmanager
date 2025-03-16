@@ -61,31 +61,43 @@ async function registerForPushNotificationsAsync() {
 
 // Fonction hybride pour planifier une notification de confirmation
 async function scheduleConfirmationNotification() {
+  console.log('[scheduleConfirmationNotification] Tentative de planification de notif.');
   if (Platform.OS === 'web') {
     // Utilisation de l'API Web Notification
     if ('Notification' in window) {
       if (Notification.permission === 'granted') {
+        console.log('[scheduleConfirmationNotification] Notification permission granted (web).');
         new Notification('Tâche créée', {
           body: 'Votre tâche a bien été enregistrée !',
         });
       } else if (Notification.permission !== 'denied') {
         const permission = await Notification.requestPermission();
         if (permission === 'granted') {
+          console.log('[scheduleConfirmationNotification] Notification permission request granted (web).');
           new Notification('Tâche créée', {
             body: 'Votre tâche a bien été enregistrée !',
           });
+        } else {
+          console.log('[scheduleConfirmationNotification] Notification permission request non accordée (web).');
         }
+      } else {
+        console.log('[scheduleConfirmationNotification] Notification permission denied (web).');
       }
     }
   } else {
     // Notification native avec expo-notifications
-    await Notifications.scheduleNotificationAsync({
-      content: {
-        title: 'Tâche créée',
-        body: 'Votre tâche a bien été enregistrée !',
-      },
-      trigger: null,
-    });
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Tâche créée',
+          body: 'Votre tâche a bien été enregistrée !',
+        },
+        trigger: null,
+      });
+      console.log('[scheduleConfirmationNotification] Notification planifiée avec succès (mobile).');
+    } catch (error) {
+      console.error('[scheduleConfirmationNotification] Erreur lors de la planification de la notif:', error);
+    }
   }
 }
 
@@ -291,8 +303,8 @@ export default function TasksScreen() {
   const [distance, setDistance] = useState('');
   const [category, setCategory] = useState('Travail');
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
-  const [flyToCoords, setFlyToCoords] = useState<[number, number] | null>(null);
   const [notifStatus, setNotifStatus] = useState<string | null>(null);
+  const [userConfig, setUserConfig] = useState<{ alarm: boolean; notification: boolean; autre: boolean } | null>(null);
 
   const { editTaskId } = useLocalSearchParams();
   const router = useRouter();
@@ -309,6 +321,7 @@ export default function TasksScreen() {
     async function checkNotifPermissions() {
       const { status } = await Notifications.getPermissionsAsync();
       setNotifStatus(status);
+      console.log('[TasksScreen] Statut des notifications:', status);
     }
     checkNotifPermissions();
   }, []);
@@ -316,6 +329,7 @@ export default function TasksScreen() {
   const handleActivateNotifications = async () => {
     const { status } = await Notifications.requestPermissionsAsync();
     setNotifStatus(status);
+    console.log('[TasksScreen] handleActivateNotifications status:', status);
     if (status !== 'granted') {
       Alert.alert(
         "Permission non accordée",
@@ -328,6 +342,25 @@ export default function TasksScreen() {
     }
   };
 
+  // Charger la configuration utilisateur sauvegardée depuis config.tsx
+  useEffect(() => {
+    const loadUserConfig = async () => {
+      try {
+        const configStr = await AsyncStorage.getItem('userConfig');
+        if (configStr) {
+          const config = JSON.parse(configStr);
+          setUserConfig(config);
+          console.log('[TasksScreen] Config utilisateur chargée:', config);
+        } else {
+          console.log('[TasksScreen] Aucune config utilisateur trouvée.');
+        }
+      } catch (error) {
+        console.error('Erreur lors du chargement de la config utilisateur', error);
+      }
+    };
+    loadUserConfig();
+  }, []);
+
   useEffect(() => {
     console.log('[TasksScreen] useEffect -> create table + load tasks');
     if (Platform.OS !== 'web') {
@@ -335,7 +368,10 @@ export default function TasksScreen() {
         tx.executeSql(
           'CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, task TEXT, date TEXT, location TEXT, distance TEXT, category TEXT);',
           [],
-          () => loadTasks(),
+          () => {
+            console.log('[TasksScreen] Table tasks créée.');
+            loadTasks();
+          },
           (error: any) => console.log('Error creating table:', error)
         );
       });
@@ -426,6 +462,23 @@ export default function TasksScreen() {
       Alert.alert('Erreur', 'Veuillez remplir au moins le titre et la date.');
       return;
     }
+    // Fonction pour planifier la notif en rechargeant la config juste avant
+    const maybeScheduleNotification = async () => {
+      try {
+        const configStr = await AsyncStorage.getItem('userConfig');
+        const config = configStr ? JSON.parse(configStr) : null;
+        console.log('[TasksScreen] Config chargée dans maybeScheduleNotification:', config);
+        if (config?.notification) {
+          console.log('[TasksScreen] Les notifications sont activées, planification...');
+          scheduleConfirmationNotification();
+        } else {
+          console.log('[TasksScreen] Notifications désactivées, aucune notif planifiée.');
+        }
+      } catch (error) {
+        console.error('[TasksScreen] Erreur lors du rechargement de la config:', error);
+      }
+    };
+
     if (editingTaskId) {
       console.log('[TasksScreen] update existing task, id=', editingTaskId);
       if (Platform.OS !== 'web') {
@@ -436,7 +489,7 @@ export default function TasksScreen() {
             () => {
               console.log('[TasksScreen] updated task in SQLite -> reloading tasks');
               loadTasks();
-              scheduleConfirmationNotification();
+              maybeScheduleNotification();
             },
             (error: any) => console.log('Error updating task in SQLite:', error)
           );
@@ -456,7 +509,7 @@ export default function TasksScreen() {
         );
         setTasks(updatedTasks);
         saveTasksToAsyncStorage(updatedTasks);
-        scheduleConfirmationNotification();
+        maybeScheduleNotification();
       }
       setEditingTaskId(null);
     } else {
@@ -469,7 +522,7 @@ export default function TasksScreen() {
             (tx: any, result: any) => {
               console.log('[TasksScreen] Task added successfully in SQLite with id:', result.insertId);
               loadTasks();
-              scheduleConfirmationNotification();
+              maybeScheduleNotification();
             },
             (error: any) => console.log("Erreur lors de l'insertion:", error)
           );
@@ -486,7 +539,7 @@ export default function TasksScreen() {
         const updatedTasks = [...tasks, newTask];
         setTasks(updatedTasks);
         saveTasksToAsyncStorage(updatedTasks);
-        scheduleConfirmationNotification();
+        maybeScheduleNotification();
       }
     }
     setTaskInput('');

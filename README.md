@@ -59,6 +59,9 @@ npm install @react-native-picker/picker --save
 npm install react-datepicker --save
 npm install react-native-date-picker --save
 npm install expo-notifications
+npm install @mui/icons-material --save
+npm install @material-ui/icons --save
 
+npm install @mui/material @mui/icons-material @emotion/react @emotion/styled
 
 ```
