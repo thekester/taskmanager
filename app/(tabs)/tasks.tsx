@@ -306,10 +306,19 @@ export default function TasksScreen() {
   const [notifStatus, setNotifStatus] = useState<string | null>(null);
   const [userConfig, setUserConfig] = useState<{ alarm: boolean; notification: boolean; autre: boolean } | null>(null);
 
-  const { editTaskId } = useLocalSearchParams();
+  // Récupération des query params : editTaskId et openModal
+  const { editTaskId, openModal } = useLocalSearchParams();
   const router = useRouter();
 
   console.log('[TasksScreen] editTaskId =', editTaskId);
+  console.log('[TasksScreen] openModal =', openModal);
+
+  // Si openModal est présent et à "true", on ouvre la modal
+  useEffect(() => {
+    if (openModal === 'true') {
+      setModalVisible(true);
+    }
+  }, [openModal]);
 
   // Demander les permissions de notifications au montage (pour natives)
   useEffect(() => {

@@ -629,6 +629,8 @@ export default function HomeScreen() {
           setLocation('');
           setDistance('');
           setCategory('Travail');
+          // Navigue vers le screen Tasks en passant le paramètre openModal=true
+          router.push('/tasks?openModal=true');
         }}
       >
         <ThemedText style={styles.floatingButtonText}>+</ThemedText>
