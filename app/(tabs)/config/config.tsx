@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, Switch, Button, Alert, StyleSheet, SafeAreaView } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -9,6 +9,24 @@ export default function ConfigScreen() {
   const [alarm, setAlarm] = useState(false);
   const [notification, setNotification] = useState(true);
   const [autre, setAutre] = useState(false);
+
+  // Charger la configuration sauvegardée au montage
+  useEffect(() => {
+    const loadConfig = async () => {
+      try {
+        const configStr = await AsyncStorage.getItem('userConfig');
+        if (configStr) {
+          const config = JSON.parse(configStr);
+          setAlarm(config.alarm);
+          setNotification(config.notification);
+          setAutre(config.autre);
+        }
+      } catch (error) {
+        console.error('Erreur lors du chargement de la configuration:', error);
+      }
+    };
+    loadConfig();
+  }, []);
 
   const saveConfig = async () => {
     const config = { alarm, notification, autre };
