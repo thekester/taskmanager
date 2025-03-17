@@ -145,10 +145,8 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
   if (Platform.OS === 'web') {
     const containerRef = useRef<HTMLDivElement>(null);
     useEffect(() => {
-      console.log('[MapboxGLJSSelector] useEffect web -> init map');
       function initializeMap() {
         if (window.mapboxgl && containerRef.current) {
-          console.log('[MapboxGLJSSelector] initializeMap -> mapboxgl found');
           window.mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN;
           const map = new window.mapboxgl.Map({
             container: containerRef.current,
@@ -158,9 +156,7 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
           });
           map.addControl(new window.mapboxgl.NavigationControl());
           map.on('load', () => {
-            console.log('[MapboxGLJSSelector] Map loaded (web).');
             if (window.MapboxSearchBox) {
-              console.log('[MapboxGLJSSelector] MapboxSearchBox found, adding search control');
               const searchBox = new window.MapboxSearchBox();
               searchBox.accessToken = window.mapboxgl.accessToken;
               searchBox.options = {
@@ -174,15 +170,11 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
           });
           map.on('click', (e: any) => {
             const lngLat = e.lngLat;
-            console.log('[MapboxGLJSSelector] Map clicked:', lngLat);
             onLocationSelect([lngLat.lng, lngLat.lat]);
           });
-        } else {
-          console.log('[MapboxGLJSSelector] window.mapboxgl not found or containerRef is null');
         }
       }
       if (!document.getElementById('mapbox-gl-css')) {
-        console.log('[MapboxGLJSSelector] injecting mapbox-gl CSS');
         const link = document.createElement('link');
         link.id = 'mapbox-gl-css';
         link.rel = 'stylesheet';
@@ -190,35 +182,28 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
         document.head.appendChild(link);
       }
       if (!document.getElementById('mapbox-gl-js')) {
-        console.log('[MapboxGLJSSelector] injecting mapbox-gl JS');
         const script = document.createElement('script');
         script.id = 'mapbox-gl-js';
         script.src = 'https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.js';
         script.async = true;
         script.onload = () => {
-          console.log('[MapboxGLJSSelector] mapbox-gl JS loaded');
           if (!document.getElementById('search-js')) {
-            console.log('[MapboxGLJSSelector] injecting search-js');
             const searchScript = document.createElement('script');
             searchScript.id = 'search-js';
             searchScript.defer = true;
             searchScript.src = 'https://api.mapbox.com/search-js/v1.0.0/web.js';
             document.body.appendChild(searchScript);
-            searchScript.onload = () => {
-              console.log('[MapboxGLJSSelector] search-js loaded -> initializeMap()');
-              initializeMap();
-            };
+            searchScript.onload = initializeMap;
           } else {
             initializeMap();
           }
         };
         document.body.appendChild(script);
       } else {
-        console.log('[MapboxGLJSSelector] mapbox-gl JS already present -> initializeMap()');
         initializeMap();
       }
     }, [MAPBOX_ACCESS_TOKEN, onLocationSelect]);
-    return <div ref={containerRef} style={{ height: '300px', marginTop: '10px', marginBottom: '10px' }} />;
+    return <div ref={containerRef} style={{ height: '300px', marginVertical: 10 }} />;
   } else {
     const htmlContent = `
 <!DOCTYPE html>
@@ -238,7 +223,6 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
   <body>
     <div id="map"></div>
     <script>
-      console.log('[Mobile HTML] Map script start');
       mapboxgl.accessToken = '${MAPBOX_ACCESS_TOKEN}';
       const map = new mapboxgl.Map({
         container: 'map',
@@ -248,9 +232,7 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
       });
       map.addControl(new mapboxgl.NavigationControl());
       map.on('load', () => {
-        console.log('[Mobile HTML] map loaded');
         if (typeof MapboxSearchBox !== 'undefined') {
-          console.log('[Mobile HTML] MapboxSearchBox found, adding it');
           const searchBox = new MapboxSearchBox();
           searchBox.accessToken = mapboxgl.accessToken;
           searchBox.options = {
@@ -260,13 +242,10 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
           searchBox.marker = true;
           searchBox.mapboxgl = mapboxgl;
           map.addControl(searchBox);
-        } else {
-          console.log('[Mobile HTML] MapboxSearchBox not found');
         }
       });
       map.on('click', (e) => {
         const lngLat = e.lngLat;
-        console.log('[Mobile HTML] Map clicked', lngLat);
         window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify({
           longitude: lngLat.lng,
           latitude: lngLat.lat
@@ -285,7 +264,6 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
           onMessage={(event) => {
             try {
               const data = JSON.parse(event.nativeEvent.data);
-              console.log('[MapboxGLJSSelector] Received coords from mobile:', data);
               onLocationSelect([data.longitude, data.latitude]);
             } catch (err) {
               console.error('Error parsing message from WebView:', err);
@@ -298,7 +276,7 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
 };
 
 const selectorStyles = StyleSheet.create({
-  container: { height: 300, marginTop: 10, marginBottom: 10 },
+  container: { height: 300, marginVertical: 10 },
   webview: { flex: 1 },
 });
 
@@ -306,8 +284,6 @@ const selectorStyles = StyleSheet.create({
 // Tâches Screen principal
 // ===========================
 export default function TasksScreen() {
-  console.log('[TasksScreen] RENDER');
-
   const [tasks, setTasks] = useState<Task[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [date, setDate] = useState<Date>(new Date());
@@ -319,12 +295,8 @@ export default function TasksScreen() {
   const [notifStatus, setNotifStatus] = useState<string | null>(null);
   const [userConfig, setUserConfig] = useState<{ alarm: boolean; notification: boolean; autre: boolean; alarmOffset: number } | null>(null);
 
-  // Récupération des query params : editTaskId et openModal
   const { editTaskId, openModal } = useLocalSearchParams();
   const router = useRouter();
-
-  console.log('[TasksScreen] editTaskId =', editTaskId);
-  console.log('[TasksScreen] openModal =', openModal);
 
   useEffect(() => {
     if (openModal === 'true') {
@@ -340,7 +312,6 @@ export default function TasksScreen() {
     async function checkNotifPermissions() {
       const { status } = await Notifications.getPermissionsAsync();
       setNotifStatus(status);
-      console.log('[TasksScreen] Statut des notifications:', status);
     }
     checkNotifPermissions();
   }, []);
@@ -348,7 +319,6 @@ export default function TasksScreen() {
   const handleActivateNotifications = async () => {
     const { status } = await Notifications.requestPermissionsAsync();
     setNotifStatus(status);
-    console.log('[TasksScreen] handleActivateNotifications status:', status);
     if (status !== 'granted') {
       Alert.alert(
         "Permission non accordée",
@@ -368,9 +338,6 @@ export default function TasksScreen() {
         if (configStr) {
           const config = JSON.parse(configStr);
           setUserConfig(config);
-          console.log('[TasksScreen] Config utilisateur chargée:', config);
-        } else {
-          console.log('[TasksScreen] Aucune config utilisateur trouvée.');
         }
       } catch (error) {
         console.error('Erreur lors du chargement de la config utilisateur', error);
@@ -380,14 +347,12 @@ export default function TasksScreen() {
   }, []);
 
   useEffect(() => {
-    console.log('[TasksScreen] useEffect -> create table + load tasks');
     if (Platform.OS !== 'web') {
       db.transaction((tx: any) => {
         tx.executeSql(
           'CREATE TABLE IF NOT EXISTS tasks (id INTEGER PRIMARY KEY AUTOINCREMENT, task TEXT, date TEXT, location TEXT, distance TEXT, category TEXT);',
           [],
           () => {
-            console.log('[TasksScreen] Table tasks créée.');
             loadTasks();
           },
           (error: any) => console.log('Error creating table:', error)
@@ -399,7 +364,6 @@ export default function TasksScreen() {
   }, []);
 
   const loadTasks = (): void => {
-    console.log('[TasksScreen] loadTasks called');
     if (Platform.OS !== 'web') {
       db.transaction((tx: any) => {
         tx.executeSql(
@@ -410,7 +374,6 @@ export default function TasksScreen() {
             for (let i = 0; i < results.rows.length; i++) {
               loadedTasks.push(results.rows.item(i));
             }
-            console.log('[TasksScreen] tasks loaded from SQLite:', loadedTasks);
             setTasks(loadedTasks);
             try {
               AsyncStorage.setItem('tasks', JSON.stringify(loadedTasks));
@@ -425,23 +388,15 @@ export default function TasksScreen() {
       const tasksStr = localStorage.getItem('tasks');
       if (tasksStr) {
         const parsed = JSON.parse(tasksStr);
-        console.log('[TasksScreen] tasks loaded from localStorage:', parsed);
         setTasks(parsed);
-      } else {
-        console.log('[TasksScreen] no tasks in localStorage');
       }
     }
   };
 
   useEffect(() => {
-    console.log('[TasksScreen] useEffect -> checking editTaskId and tasks');
-    console.log('[TasksScreen] tasks =', tasks);
     if (editTaskId) {
-      console.log('[TasksScreen] we have editTaskId:', editTaskId);
       const found = tasks.find((t) => t.id.toString() === editTaskId.toString());
-      console.log('[TasksScreen] found task =', found);
       if (found) {
-        console.log('[TasksScreen] opening modal for found task:', found);
         setTaskInput(found.task);
         setDate(new Date(found.date));
         setLocation(found.location || '');
@@ -449,32 +404,25 @@ export default function TasksScreen() {
         setCategory(found.category || 'Travail');
         setEditingTaskId(found.id.toString());
         setModalVisible(true);
-      } else {
-        console.log('[TasksScreen] no matching task found for editTaskId');
       }
-    } else {
-      console.log('[TasksScreen] no editTaskId -> do nothing');
     }
   }, [editTaskId, tasks]);
 
   const saveTasksToAsyncStorage = async (updatedTasks: Task[]): Promise<void> => {
     try {
       await AsyncStorage.setItem('tasks', JSON.stringify(updatedTasks));
-      console.log('[TasksScreen] saved tasks to AsyncStorage:', updatedTasks);
     } catch (error) {
       console.error('Error saving tasks to AsyncStorage:', error);
     }
   };
 
   const closeModal = (): void => {
-    console.log('[TasksScreen] closeModal called');
     setModalVisible(false);
     setEditingTaskId(null);
     router.replace('/tasks');
   };
 
   const handleSaveTask = (): void => {
-    console.log('[TasksScreen] handleSaveTask called');
     const dateString = date.toISOString();
     if (!taskInput || !dateString) {
       Alert.alert('Erreur', 'Veuillez remplir au moins le titre et la date.');
@@ -485,14 +433,12 @@ export default function TasksScreen() {
     };
 
     if (editingTaskId) {
-      console.log('[TasksScreen] update existing task, id=', editingTaskId);
       if (Platform.OS !== 'web') {
         db.transaction((tx: any) => {
           tx.executeSql(
             'UPDATE tasks SET task=?, date=?, location=?, distance=?, category=? WHERE id=?;',
             [taskInput, dateString, location, distance, category, editingTaskId],
             () => {
-              console.log('[TasksScreen] updated task in SQLite -> reloading tasks');
               loadTasks();
               const updatedTask: Task = {
                 id: editingTaskId,
@@ -520,14 +466,12 @@ export default function TasksScreen() {
       }
       setEditingTaskId(null);
     } else {
-      console.log('[TasksScreen] create new task');
       if (Platform.OS !== 'web') {
         db.transaction((tx: any) => {
           tx.executeSql(
             'INSERT INTO tasks (task, date, location, distance, category) VALUES (?,?,?,?,?);',
             [taskInput, dateString, location, distance, category],
             (tx: any, result: any) => {
-              console.log('[TasksScreen] Task added successfully in SQLite with id:', result.insertId);
               loadTasks();
               const newTask: Task = {
                 id: result.insertId,
@@ -566,14 +510,12 @@ export default function TasksScreen() {
   };
 
   const handleDeleteTask = (id: string | number): void => {
-    console.log('[TasksScreen] handleDeleteTask -> id=', id);
     if (Platform.OS !== 'web') {
       db.transaction((tx: any) => {
         tx.executeSql(
           'DELETE FROM tasks WHERE id=?;',
           [id],
           () => {
-            console.log('[TasksScreen] deleted task in SQLite -> reloading tasks');
             loadTasks();
           },
           (error: any) => console.log('Error deleting task from SQLite:', error)
@@ -587,10 +529,8 @@ export default function TasksScreen() {
   };
 
   const handleEditTask = (id: string | number): void => {
-    console.log('[TasksScreen] handleEditTask -> id=', id);
     const taskToEdit = tasks.find((t) => t.id === id);
     if (taskToEdit) {
-      console.log('[TasksScreen] editing found task =', taskToEdit);
       setTaskInput(taskToEdit.task);
       setDate(new Date(taskToEdit.date));
       setLocation(taskToEdit.location || '');
@@ -598,8 +538,6 @@ export default function TasksScreen() {
       setCategory(taskToEdit.category || 'Travail');
       setEditingTaskId(id.toString());
       setModalVisible(true);
-    } else {
-      console.log('[TasksScreen] no task found for id=', id);
     }
   };
 
@@ -620,16 +558,16 @@ export default function TasksScreen() {
 
   const renderTaskItem = ({ item }: { item: Task }) => (
     <View style={styles.taskItem}>
-      <Text style={styles.taskText}>Tâche: {item.task}</Text>
-      <Text style={styles.taskText}>Date: {item.date}</Text>
-      {item.location ? <Text style={styles.taskText}>Lieu: {item.location}</Text> : null}
-      {item.distance ? <Text style={styles.taskText}>Distance: {item.distance}m</Text> : null}
+      <Text style={styles.taskTitle}>{item.task}</Text>
+      <Text style={styles.taskDetail}>Date : {new Date(item.date).toLocaleString()}</Text>
+      {item.location ? <Text style={styles.taskDetail}>Lieu : {item.location}</Text> : null}
+      {item.distance ? <Text style={styles.taskDetail}>Distance : {item.distance} m</Text> : null}
       <View style={styles.buttonContainer}>
         <TouchableOpacity style={styles.editButton} onPress={() => handleEditTask(item.id)}>
-          <Text style={styles.editButtonText}>Modifier</Text>
+          <Text style={styles.buttonText}>Modifier</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.deleteButton} onPress={() => handleDeleteTask(item.id)}>
-          <Text style={styles.deleteButtonText}>Supprimer</Text>
+          <Text style={styles.buttonText}>Supprimer</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -639,17 +577,14 @@ export default function TasksScreen() {
     <View style={styles.container}>
       <Text style={styles.header}>Gestion des Tâches</Text>
       <View style={styles.notifContainer}>
-        <Text style={styles.notifStatusText}>
-          Notifications : {notifStatus || 'inconnu'}
-        </Text>
+        <Text style={styles.notifText}>Notifications : {notifStatus || 'inconnu'}</Text>
         {notifStatus !== 'granted' && (
-          <Button title="Activate Notifications" onPress={handleActivateNotifications} />
+          <Button title="Activer" onPress={handleActivateNotifications} />
         )}
       </View>
       <TouchableOpacity
         style={styles.addButton}
         onPress={() => {
-          console.log('[TasksScreen] "Create new Task" button pressed');
           setModalVisible(true);
           setEditingTaskId(null);
           setTaskInput('');
@@ -659,7 +594,7 @@ export default function TasksScreen() {
           setCategory('Travail');
         }}
       >
-        <Text style={styles.addButtonText}>+ Create a new Task</Text>
+        <Text style={styles.addButtonText}>+ Nouvelle Tâche</Text>
       </TouchableOpacity>
       <SectionList
         sections={sortTasksByCategory()}
@@ -668,6 +603,7 @@ export default function TasksScreen() {
         renderSectionHeader={({ section }) => (
           <Text style={styles.sectionHeader}>{section.title}</Text>
         )}
+        contentContainerStyle={styles.listContent}
       />
       <Modal
         visible={modalVisible}
@@ -684,18 +620,12 @@ export default function TasksScreen() {
               style={styles.modalInput}
               placeholder="Titre de la tâche"
               value={taskInput}
-              onChangeText={(text) => {
-                console.log('[TasksScreen] setTaskInput ->', text);
-                setTaskInput(text);
-              }}
+              onChangeText={setTaskInput}
             />
             {Platform.OS === 'web' ? (
               <WebDatePicker
                 selected={date}
-                onChange={(selectedDate: Date) => {
-                  console.log('[TasksScreen] Date changed (web) ->', selectedDate);
-                  setDate(selectedDate);
-                }}
+                onChange={(selectedDate: Date) => setDate(selectedDate)}
                 showTimeSelect
                 timeFormat="HH:mm"
                 timeIntervals={15}
@@ -705,10 +635,7 @@ export default function TasksScreen() {
             ) : (
               <DatePickerMobile
                 date={date}
-                onDateChange={(newDate: Date) => {
-                  console.log('[TasksScreen] Date changed (mobile) ->', newDate);
-                  setDate(newDate);
-                }}
+                onDateChange={setDate}
                 mode="datetime"
               />
             )}
@@ -716,38 +643,26 @@ export default function TasksScreen() {
               style={styles.modalInput}
               placeholder="Emplacement (optionnel)"
               value={location}
-              onChangeText={(text) => {
-                console.log('[TasksScreen] setLocation ->', text);
-                setLocation(text);
-              }}
+              onChangeText={setLocation}
             />
             <TextInput
               style={styles.modalInput}
               placeholder="Distance (optionnel)"
               value={distance}
-              onChangeText={(text) => {
-                console.log('[TasksScreen] setDistance ->', text);
-                setDistance(text);
-              }}
+              onChangeText={setDistance}
               keyboardType="numeric"
             />
             <Picker
               selectedValue={category}
               style={styles.picker}
-              onValueChange={(itemValue: string) => {
-                console.log('[TasksScreen] setCategory ->', itemValue);
-                setCategory(itemValue);
-              }}
+              onValueChange={(itemValue: string) => setCategory(itemValue)}
             >
               <Picker.Item label="Travail" value="Travail" />
               <Picker.Item label="Famille" value="Famille" />
               <Picker.Item label="Divers" value="Divers" />
             </Picker>
             <MapboxGLJSSelector
-              onLocationSelect={(coords: number[]) => {
-                console.log('[TasksScreen] onLocationSelect from Mapbox ->', coords);
-                setLocation(JSON.stringify(coords));
-              }}
+              onLocationSelect={(coords: number[]) => setLocation(JSON.stringify(coords))}
             />
             <View style={styles.modalButtonContainer}>
               <TouchableOpacity style={styles.modalButton} onPress={handleSaveTask}>
@@ -766,28 +681,115 @@ export default function TasksScreen() {
   );
 }
 
+const basePadding = 16;
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20, backgroundColor: '#f0f0f0' },
-  notifContainer: { padding: 10, backgroundColor: '#eee', alignItems: 'center' },
-  notifStatusText: { fontSize: 16, marginBottom: 5 },
-  header: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginTop: 20, marginBottom: 20 },
-  addButton: { backgroundColor: '#4CAF50', padding: 15, borderRadius: 8, alignItems: 'center', marginBottom: 20 },
-  addButtonText: { color: '#fff', fontSize: 18 },
-  sectionHeader: { fontSize: 18, fontWeight: 'bold', backgroundColor: '#eee', padding: 5, marginTop: 15 },
-  taskItem: { backgroundColor: '#fff', padding: 15, borderRadius: 8, borderWidth: 1, borderColor: '#ccc', marginBottom: 10 },
-  taskText: { fontSize: 16, marginBottom: 5 },
-  buttonContainer: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
-  editButton: { flex: 0.48, padding: 10, backgroundColor: 'orange', borderRadius: 5, alignItems: 'center' },
-  editButtonText: { color: '#fff', fontSize: 16 },
-  deleteButton: { flex: 0.48, padding: 10, backgroundColor: 'red', borderRadius: 5, alignItems: 'center' },
-  deleteButtonText: { color: '#fff', fontSize: 16 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' },
-  modalContainer: { width: '90%', backgroundColor: '#fff', borderRadius: 12, padding: 20 },
-  modalTitle: { fontSize: 24, fontWeight: '700', marginBottom: 15, textAlign: 'center', color: '#333' },
-  modalInput: { backgroundColor: '#f9f9f9', height: 45, borderColor: '#ddd', borderWidth: 1, borderRadius: 8, marginBottom: 15, paddingHorizontal: 15 },
-  picker: { height: 50, width: '100%', marginBottom: 15 },
-  modalButtonContainer: { flexDirection: 'row', justifyContent: 'space-between' },
-  modalButton: { flex: 1, backgroundColor: '#4CAF50', paddingVertical: 12, borderRadius: 8, marginHorizontal: 5, alignItems: 'center' },
-  cancelButton: { backgroundColor: '#F44336' },
+  container: { flex: 1, padding: basePadding, backgroundColor: '#EFEFEF' },
+  header: { fontSize: 28, fontWeight: 'bold', textAlign: 'center', marginVertical: basePadding },
+  notifContainer: {
+    backgroundColor: '#fff',
+    padding: basePadding / 2,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: basePadding,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  notifText: { fontSize: 16, color: '#333' },
+  addButton: {
+    backgroundColor: '#4CAF50',
+    paddingVertical: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    marginBottom: basePadding,
+  },
+  addButtonText: { color: '#fff', fontSize: 18, fontWeight: '600' },
+  sectionHeader: {
+    backgroundColor: '#dfe6e9',
+    paddingVertical: 8,
+    paddingHorizontal: basePadding,
+    fontSize: 18,
+    fontWeight: '600',
+    marginTop: basePadding / 2,
+  },
+  listContent: { paddingBottom: basePadding },
+  taskItem: {
+    backgroundColor: '#fff',
+    padding: basePadding,
+    borderRadius: 10,
+    marginVertical: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 3,
+    elevation: 2,
+  },
+  taskTitle: { fontSize: 18, fontWeight: 'bold', color: '#2d3436' },
+  taskDetail: { fontSize: 14, color: '#636e72', marginVertical: 2 },
+  buttonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: basePadding / 2,
+  },
+  editButton: {
+    flex: 0.48,
+    backgroundColor: 'orange',
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  deleteButton: {
+    flex: 0.48,
+    backgroundColor: '#E74C3C',
+    paddingVertical: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  buttonText: { color: '#fff', fontSize: 16, fontWeight: '500' },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    width: '90%',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    padding: basePadding,
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    marginBottom: basePadding,
+    textAlign: 'center',
+    color: '#333',
+  },
+  modalInput: {
+    backgroundColor: '#f9f9f9',
+    height: 45,
+    borderColor: '#ddd',
+    borderWidth: 1,
+    borderRadius: 8,
+    marginBottom: basePadding,
+    paddingHorizontal: basePadding,
+  },
+  picker: { height: 50, width: '100%', marginBottom: basePadding },
+  modalButtonContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: basePadding,
+  },
+  modalButton: {
+    flex: 1,
+    backgroundColor: '#4CAF50',
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginHorizontal: 5,
+    alignItems: 'center',
+  },
+  cancelButton: { backgroundColor: '#E74C3C' },
   modalButtonText: { color: '#fff', fontSize: 18, fontWeight: '600' },
 });

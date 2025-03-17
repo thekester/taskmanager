@@ -17,6 +17,8 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import SQLite from 'react-native-sqlite-storage';
 import * as Notifications from 'expo-notifications';
 import * as Linking from 'expo-linking';
+import anime from 'animejs/lib/anime.es.js'; // Pour le web
+import * as Animatable from 'react-native-animatable'; // Pour Android/iOS
 
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
@@ -308,9 +310,10 @@ interface CalendarViewProps {
   selectedDay: Date;
   setSelectedDay: (day: Date) => void;
   onTaskPress?: (task: Task) => void;
+  onCreateTask?: (day: Date) => void;
 }
 
-const CalendarView: React.FC<CalendarViewProps> = ({ tasks, selectedDay, setSelectedDay, onTaskPress }) => {
+const CalendarView: React.FC<CalendarViewProps> = ({ tasks, selectedDay, setSelectedDay, onTaskPress, onCreateTask }) => {
   const daysInMonth = new Date(selectedDay.getFullYear(), selectedDay.getMonth() + 1, 0).getDate();
   const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
@@ -324,12 +327,30 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, selectedDay, setSele
 
   const selectedDayTasks = getTasksForDay(selectedDay.getDate());
 
+  const goToPreviousMonth = () => {
+    const prevMonth = new Date(selectedDay.getFullYear(), selectedDay.getMonth() - 1, 1);
+    const day = Math.min(selectedDay.getDate(), new Date(prevMonth.getFullYear(), prevMonth.getMonth() + 1, 0).getDate());
+    setSelectedDay(new Date(prevMonth.getFullYear(), prevMonth.getMonth(), day));
+  };
+
+  const goToNextMonth = () => {
+    const nextMonth = new Date(selectedDay.getFullYear(), selectedDay.getMonth() + 1, 1);
+    const day = Math.min(selectedDay.getDate(), new Date(nextMonth.getFullYear(), nextMonth.getMonth() + 1, 0).getDate());
+    setSelectedDay(new Date(nextMonth.getFullYear(), nextMonth.getMonth(), day));
+  };
+
   return (
     <View style={styles.calendarContainer}>
       <View style={styles.calendarHeader}>
+        <TouchableOpacity onPress={goToPreviousMonth}>
+          <Text style={styles.navButton}>«</Text>
+        </TouchableOpacity>
         <Text style={styles.calendarTitle}>
           {selectedDay.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
         </Text>
+        <TouchableOpacity onPress={goToNextMonth}>
+          <Text style={styles.navButton}>»</Text>
+        </TouchableOpacity>
       </View>
       <View style={styles.calendarGrid}>
         {daysArray.map((day) => {
@@ -354,9 +375,14 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, selectedDay, setSele
         })}
       </View>
       <View style={styles.tasksForDayContainer}>
-        <Text style={styles.sectionHeader}>
-          Tâches du {selectedDay.toLocaleDateString('fr-FR')}
-        </Text>
+        <View style={styles.tasksHeader}>
+          <Text style={styles.sectionHeader}>
+            Tâches du {selectedDay.toLocaleDateString('fr-FR')}
+          </Text>
+          <TouchableOpacity onPress={() => onCreateTask && onCreateTask(selectedDay)}>
+            <Text style={styles.createButton}>Créer une tâche</Text>
+          </TouchableOpacity>
+        </View>
         {selectedDayTasks.length === 0 ? (
           <Text style={styles.emptyText}>Aucune tâche pour cette date</Text>
         ) : (
@@ -367,7 +393,12 @@ const CalendarView: React.FC<CalendarViewProps> = ({ tasks, selectedDay, setSele
             renderItem={({ item }) => (
               <TouchableOpacity onPress={() => onTaskPress && onTaskPress(item)}>
                 <View style={styles.taskCard}>
-                  <Text style={styles.taskCardText}>{item.task}</Text>
+                  <Text style={styles.taskCardText}>Nom: {item.task}</Text>
+                  <Text style={styles.taskCardText}>
+                    Date: {new Date(item.date).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                  </Text>
+                  {item.category && <Text style={styles.taskCardText}>Catégorie: {item.category}</Text>}
+                  {item.distance && <Text style={styles.taskCardText}>Distance: {item.distance}m</Text>}
                 </View>
               </TouchableOpacity>
             )}
@@ -396,6 +427,8 @@ export default function HomeScreen() {
   const [selectedDay, setSelectedDay] = useState(new Date());
 
   const router = useRouter();
+  // Référence pour la section "Carte des tâches"
+  const mapSectionRef = useRef<View>(null);
 
   useEffect(() => {
     async function checkNotifPermissions() {
@@ -433,8 +466,7 @@ export default function HomeScreen() {
           }
           setRecentTasks(loaded);
         },
-        (error: any) =>
-          console.log('Erreur lors du chargement des tâches récentes:', error)
+        (error: any) => console.log('Erreur lors du chargement des tâches récentes:', error)
       );
     });
   };
@@ -452,8 +484,7 @@ export default function HomeScreen() {
           }
           setUpcomingTasks(loaded);
         },
-        (error: any) =>
-          console.log('Erreur lors du chargement des tâches à venir:', error)
+        (error: any) => console.log('Erreur lors du chargement des tâches à venir:', error)
       );
     });
   };
@@ -503,21 +534,13 @@ export default function HomeScreen() {
               loadRecentTasks();
               loadUpcomingTasks();
             },
-            (error: any) =>
-              console.log('Erreur lors de la mise à jour:', error)
+            (error: any) => console.log('Erreur lors de la mise à jour:', error)
           );
         });
       } else {
         const updatedTasks = recentTasks.concat(upcomingTasks).map((t) =>
           t.id === parseInt(editingTaskId)
-            ? {
-                ...t,
-                task: taskInput,
-                date: dateString,
-                location,
-                distance,
-                category,
-              }
+            ? { ...t, task: taskInput, date: dateString, location, distance, category }
             : t
         );
         localStorage.setItem('tasks', JSON.stringify(updatedTasks));
@@ -535,8 +558,7 @@ export default function HomeScreen() {
               loadRecentTasks();
               loadUpcomingTasks();
             },
-            (error: any) =>
-              console.log("Erreur lors de l'insertion:", error)
+            (error: any) => console.log("Erreur lors de l'insertion:", error)
           );
         });
       } else {
@@ -578,9 +600,12 @@ export default function HomeScreen() {
 
   const handleViewOnMap = (coords: [number, number]) => {
     setFlyToCoords(coords);
+    // Pour la version web, scroll vers la section "Carte des tâches" (si la référence est définie)
+    if (Platform.OS === 'web' && mapSectionRef.current) {
+      (mapSectionRef.current as any).scrollIntoView({ behavior: 'smooth' });
+    }
   };
 
-  // Gestion du clic sur une tâche dans le calendrier
   const handleTaskPress = (task: Task) => {
     if (task.location && task.location.trim() !== '') {
       Alert.alert(
@@ -603,26 +628,37 @@ export default function HomeScreen() {
     }
   };
 
+  const handleCreateTask = (day: Date) => {
+    setSelectedDay(day);
+    setModalVisible(true);
+    setEditingTaskId(null);
+    setTaskInput('');
+    setDate(day);
+    setLocation('');
+    setDistance('');
+    setCategory('Travail');
+    router.push('/tasks?openModal=true');
+  };
+
   const TaskItem: React.FC<{ task: Task }> = ({ task }) => (
     <ThemedView style={styles.taskItem}>
       <ThemedText style={styles.taskTitle}>{task.task}</ThemedText>
-      <ThemedText style={styles.taskSubtitle}>{task.date}</ThemedText>
+      <ThemedText style={styles.taskSubtitle}>{new Date(task.date).toLocaleString('fr-FR')}</ThemedText>
+      {task.category && <ThemedText style={styles.taskSubtitle}>Catégorie: {task.category}</ThemedText>}
+      {task.distance && <ThemedText style={styles.taskSubtitle}>Distance: {task.distance} m</ThemedText>}
       {task.location && task.location.trim() !== '' && (
         <TouchableOpacity
           onPress={() => {
-            if (task.location) {
-              const coords = JSON.parse(task.location!);
-              handleViewOnMap(coords);
-            }
+            const coords = JSON.parse(task.location!);
+            handleViewOnMap(coords);
           }}
         >
-          <ThemedText style={styles.linkText}>View on Map</ThemedText>
+          <ThemedText style={styles.linkText}>Voir sur la carte</ThemedText>
         </TouchableOpacity>
       )}
     </ThemedView>
   );
 
-  // Organisation des sections pour la FlatList principale
   const sections = [
     {
       key: 'recent',
@@ -669,7 +705,8 @@ export default function HomeScreen() {
     {
       key: 'map',
       render: () => (
-        <View style={styles.sectionContainer}>
+        // Ajout d'une référence pour pouvoir scroller jusqu'ici
+        <View style={styles.sectionContainer} ref={mapSectionRef as any}>
           <ThemedText type="subtitle">Carte des tâches</ThemedText>
           <MapboxGLJSWebView
             tasks={[...recentTasks, ...upcomingTasks]}
@@ -683,22 +720,21 @@ export default function HomeScreen() {
       key: 'calendar',
       render: () => (
         <View style={styles.sectionContainer}>
-          {/* Titre du calendrier en noir */}
           <ThemedText type="subtitle" style={{ color: 'black' }}>Calendrier</ThemedText>
           <CalendarView
             tasks={[...recentTasks, ...upcomingTasks]}
             selectedDay={selectedDay}
             setSelectedDay={setSelectedDay}
             onTaskPress={handleTaskPress}
+            onCreateTask={handleCreateTask}
           />
         </View>
       ),
     },
   ];
 
-  // Composant d'en-tête de la FlatList principale
   const ListHeader = () => (
-    <View>
+    <Animatable.View animation="fadeInDown" duration={1000} style={styles.headerContainer}>
       <LinearGradient colors={['#FF7E5F', '#FEB47B']} style={styles.headerGradient}>
         <ThemedText type="title" style={styles.headerTitle}>
           Task Manager
@@ -707,11 +743,13 @@ export default function HomeScreen() {
           Gérez vos tâches avec style
         </ThemedText>
       </LinearGradient>
-    </View>
+    </Animatable.View>
   );
 
+  const Container = Platform.OS === 'web' ? View : Animatable.View;
+
   return (
-    <SafeAreaView style={styles.container}>
+    <Container animation="fadeIn" duration={1200} style={styles.container}>
       <View style={styles.notifContainer}>
         <Text style={styles.notifStatusText}>
           Notifications : {notifStatus || 'inconnu'}
@@ -727,22 +765,25 @@ export default function HomeScreen() {
         renderItem={({ item }) => item.render()}
         ListFooterComponent={<View style={{ height: 30 }} />}
       />
-      <TouchableOpacity
-        style={styles.floatingButton}
-        onPress={() => {
-          setModalVisible(true);
-          setEditingTaskId(null);
-          setTaskInput('');
-          setDate(new Date());
-          setLocation('');
-          setDistance('');
-          setCategory('Travail');
-          router.push('/tasks?openModal=true');
-        }}
-      >
-        <ThemedText style={styles.floatingButtonText}>+</ThemedText>
-      </TouchableOpacity>
-    </SafeAreaView>
+      {/* Bouton flottant avec 3 allers-retours de bounce */}
+      <Animatable.View animation="bounce" iterationCount={3} duration={3000}>
+        <TouchableOpacity
+          style={styles.floatingButton}
+          onPress={() => {
+            setModalVisible(true);
+            setEditingTaskId(null);
+            setTaskInput('');
+            setDate(new Date());
+            setLocation('');
+            setDistance('');
+            setCategory('Travail');
+            router.push('/tasks?openModal=true');
+          }}
+        >
+          <ThemedText style={styles.floatingButtonText}>+</ThemedText>
+        </TouchableOpacity>
+      </Animatable.View>
+    </Container>
   );
 }
 
@@ -751,6 +792,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Platform.select({ web: '#fafafa', default: '#fff' }),
   },
+  headerContainer: {
+    marginTop: Platform.OS === 'web' ? 60 : 40,
+  },
+  headerGradient: {
+    padding: 20,
+    alignItems: 'center',
+    borderRadius: 10,
+    marginHorizontal: 16,
+  },
+  headerTitle: { fontSize: 28, fontWeight: 'bold', color: '#fff' },
+  headerSubtitle: { fontSize: 16, color: '#fff', marginTop: 4 },
   notifContainer: {
     padding: 10,
     backgroundColor: '#eee',
@@ -760,15 +812,6 @@ const styles = StyleSheet.create({
     fontSize: 16,
     marginBottom: 5,
   },
-  headerGradient: {
-    padding: 20,
-    alignItems: 'center',
-    borderRadius: 10,
-    margin: 16,
-    marginTop: 60,
-  },
-  headerTitle: { fontSize: 28, fontWeight: 'bold', color: '#fff' },
-  headerSubtitle: { fontSize: 16, color: '#fff', marginTop: 4 },
   sectionContainer: { marginTop: 10, marginBottom: 10, paddingHorizontal: 20 },
   emptyText: { fontSize: 16, color: '#777', marginTop: 10, textAlign: 'center' },
   taskList: { paddingVertical: 10 },
@@ -806,7 +849,6 @@ const styles = StyleSheet.create({
   floatingButtonText: { fontSize: 30, color: '#fff' },
   mapContainer: { height: 300, marginTop: 10, marginBottom: 10 },
   map: { flex: 1 },
-  // Nouveaux styles pour le calendrier
   calendarContainer: {
     backgroundColor: '#f7f7f7',
     borderRadius: 12,
@@ -814,6 +856,8 @@ const styles = StyleSheet.create({
     marginTop: 10,
   },
   calendarHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 10,
   },
@@ -821,6 +865,11 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: 'bold',
     color: '#333',
+  },
+  navButton: {
+    fontSize: 24,
+    color: '#4A90E2',
+    paddingHorizontal: 10,
   },
   calendarGrid: {
     flexDirection: 'row',
@@ -851,11 +900,21 @@ const styles = StyleSheet.create({
   tasksForDayContainer: {
     marginTop: 10,
   },
+  tasksHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
   sectionHeader: {
     fontSize: 18,
     fontWeight: 'bold',
     marginVertical: 10,
     color: '#333',
+  },
+  createButton: {
+    color: '#FF7E5F',
+    fontSize: 16,
+    fontWeight: 'bold',
   },
   taskCard: {
     backgroundColor: '#fff',
