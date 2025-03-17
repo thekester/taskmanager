@@ -1,6 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
 import {
-  Image,
   StyleSheet,
   FlatList,
   SafeAreaView,
@@ -10,6 +9,7 @@ import {
   Text,
   Button,
   Alert,
+  SectionList,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,7 +20,8 @@ import * as Linking from 'expo-linking';
 
 import { ThemedText } from '@/components/ThemedText';
 import { ThemedView } from '@/components/ThemedView';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
+
+// Nous avons retiré l'utilisation de ParallaxScrollView pour éviter de placer des VirtualizedLists dans un ScrollView standard.
 
 declare global {
   interface Window {
@@ -302,6 +303,84 @@ const MapboxGLJSWebView: React.FC<MapboxGLJSWebViewProps> = ({
   }
 };
 
+interface CalendarViewProps {
+  tasks: Task[];
+  selectedDay: Date;
+  setSelectedDay: (day: Date) => void;
+  onTaskPress?: (task: Task) => void;
+}
+
+const CalendarView: React.FC<CalendarViewProps> = ({ tasks, selectedDay, setSelectedDay, onTaskPress }) => {
+  const daysInMonth = new Date(selectedDay.getFullYear(), selectedDay.getMonth() + 1, 0).getDate();
+  const daysArray = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+
+  const getTasksForDay = (day: number) => {
+    const date = new Date(selectedDay.getFullYear(), selectedDay.getMonth(), day);
+    return tasks.filter((task) => {
+      const taskDate = new Date(task.date);
+      return taskDate.toDateString() === date.toDateString();
+    });
+  };
+
+  const selectedDayTasks = getTasksForDay(selectedDay.getDate());
+
+  return (
+    <View style={styles.calendarContainer}>
+      <View style={styles.calendarHeader}>
+        <Text style={styles.calendarTitle}>
+          {selectedDay.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
+        </Text>
+      </View>
+      <View style={styles.calendarGrid}>
+        {daysArray.map((day) => {
+          const dayDate = new Date(selectedDay.getFullYear(), selectedDay.getMonth(), day);
+          const isSelected = dayDate.toDateString() === selectedDay.toDateString();
+          const hasTask = tasks.some(
+            (task) => new Date(task.date).toDateString() === dayDate.toDateString()
+          );
+          return (
+            <TouchableOpacity
+              key={day.toString()}
+              onPress={() => setSelectedDay(dayDate)}
+              style={[
+                styles.calendarDay,
+                isSelected && styles.calendarDaySelected,
+                hasTask && styles.calendarDayWithTask,
+              ]}
+            >
+              <Text style={styles.calendarDayText}>{day}</Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+      <View style={styles.tasksForDayContainer}>
+        <Text style={styles.sectionHeader}>
+          Tâches du {selectedDay.toLocaleDateString('fr-FR')}
+        </Text>
+        {selectedDayTasks.length === 0 ? (
+          <Text style={styles.emptyText}>Aucune tâche pour cette date</Text>
+        ) : (
+          <SectionList
+            sections={[{ title: selectedDay.toLocaleDateString('fr-FR'), data: selectedDayTasks }]}
+            keyExtractor={(item) => item.id.toString()}
+            scrollEnabled={false}
+            renderItem={({ item }) => (
+              <TouchableOpacity onPress={() => onTaskPress && onTaskPress(item)}>
+                <View style={styles.taskCard}>
+                  <Text style={styles.taskCardText}>{item.task}</Text>
+                </View>
+              </TouchableOpacity>
+            )}
+            renderSectionHeader={({ section }) => (
+              <Text style={styles.sectionHeader}>{section.title}</Text>
+            )}
+          />
+        )}
+      </View>
+    </View>
+  );
+};
+
 export default function HomeScreen() {
   const [recentTasks, setRecentTasks] = useState<Task[]>([]);
   const [upcomingTasks, setUpcomingTasks] = useState<Task[]>([]);
@@ -314,6 +393,7 @@ export default function HomeScreen() {
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [flyToCoords, setFlyToCoords] = useState<[number, number] | null>(null);
   const [notifStatus, setNotifStatus] = useState<string | null>(null);
+  const [selectedDay, setSelectedDay] = useState(new Date());
 
   const router = useRouter();
 
@@ -500,6 +580,29 @@ export default function HomeScreen() {
     setFlyToCoords(coords);
   };
 
+  // Gestion du clic sur une tâche dans le calendrier
+  const handleTaskPress = (task: Task) => {
+    if (task.location && task.location.trim() !== '') {
+      Alert.alert(
+        "Action sur la tâche",
+        "Voulez-vous voir la tâche sur la carte ou la modifier ?",
+        [
+          {
+            text: "Voir sur la carte",
+            onPress: () => {
+              const coords = JSON.parse(task.location!);
+              handleViewOnMap(coords);
+            },
+          },
+          { text: "Modifier", onPress: () => handleEditTaskFromMap(task.id.toString()) },
+          { text: "Annuler", style: "cancel" },
+        ]
+      );
+    } else {
+      handleEditTaskFromMap(task.id.toString());
+    }
+  };
+
   const TaskItem: React.FC<{ task: Task }> = ({ task }) => (
     <ThemedView style={styles.taskItem}>
       <ThemedText style={styles.taskTitle}>{task.task}</ThemedText>
@@ -508,7 +611,7 @@ export default function HomeScreen() {
         <TouchableOpacity
           onPress={() => {
             if (task.location) {
-              const coords = JSON.parse(task.location);
+              const coords = JSON.parse(task.location!);
               handleViewOnMap(coords);
             }
           }}
@@ -519,36 +622,12 @@ export default function HomeScreen() {
     </ThemedView>
   );
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.notifContainer}>
-        <Text style={styles.notifStatusText}>
-          Notifications : {notifStatus || 'inconnu'}
-        </Text>
-        {notifStatus !== 'granted' && (
-          <Button title="Activate Notifications" onPress={handleActivateNotifications} />
-        )}
-      </View>
-
-      <ParallaxScrollView
-        headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-        headerImage={
-          <Image
-            source={require('@/assets/images/partial-react-logo.png')}
-            style={styles.reactLogo}
-          />
-        }
-      >
-        <LinearGradient colors={['#FF7E5F', '#FEB47B']} style={styles.headerGradient}>
-          <ThemedText type="title" style={styles.headerTitle}>
-            Task Manager
-          </ThemedText>
-          <ThemedText style={styles.headerSubtitle}>
-            Gérez vos tâches avec style
-          </ThemedText>
-        </LinearGradient>
-
-        <ThemedView style={styles.sectionContainer}>
+  // Organisation des sections pour la FlatList principale
+  const sections = [
+    {
+      key: 'recent',
+      render: () => (
+        <View style={styles.sectionContainer}>
           <ThemedText type="subtitle">Mes tâches récemment créées</ThemedText>
           {recentTasks.length === 0 ? (
             <ThemedText style={styles.emptyText}>Aucune tâche encore ajoutée</ThemedText>
@@ -562,9 +641,13 @@ export default function HomeScreen() {
               contentContainerStyle={styles.taskList}
             />
           )}
-        </ThemedView>
-
-        <ThemedView style={styles.sectionContainer}>
+        </View>
+      ),
+    },
+    {
+      key: 'upcoming',
+      render: () => (
+        <View style={styles.sectionContainer}>
           <ThemedText type="subtitle">Tâches à venir</ThemedText>
           {upcomingTasks.length === 0 ? (
             <ThemedText style={styles.emptyText}>
@@ -580,18 +663,70 @@ export default function HomeScreen() {
               contentContainerStyle={styles.taskList}
             />
           )}
-        </ThemedView>
-
-        <ThemedView style={styles.sectionContainer}>
+        </View>
+      ),
+    },
+    {
+      key: 'map',
+      render: () => (
+        <View style={styles.sectionContainer}>
           <ThemedText type="subtitle">Carte des tâches</ThemedText>
           <MapboxGLJSWebView
             tasks={[...recentTasks, ...upcomingTasks]}
             onEditTask={handleEditTaskFromMap}
             flyToCoords={flyToCoords}
           />
-        </ThemedView>
-      </ParallaxScrollView>
+        </View>
+      ),
+    },
+    {
+      key: 'calendar',
+      render: () => (
+        <View style={styles.sectionContainer}>
+          {/* Titre du calendrier en noir */}
+          <ThemedText type="subtitle" style={{ color: 'black' }}>Calendrier</ThemedText>
+          <CalendarView
+            tasks={[...recentTasks, ...upcomingTasks]}
+            selectedDay={selectedDay}
+            setSelectedDay={setSelectedDay}
+            onTaskPress={handleTaskPress}
+          />
+        </View>
+      ),
+    },
+  ];
 
+  // Composant d'en-tête de la FlatList principale
+  const ListHeader = () => (
+    <View>
+      <LinearGradient colors={['#FF7E5F', '#FEB47B']} style={styles.headerGradient}>
+        <ThemedText type="title" style={styles.headerTitle}>
+          Task Manager
+        </ThemedText>
+        <ThemedText style={styles.headerSubtitle}>
+          Gérez vos tâches avec style
+        </ThemedText>
+      </LinearGradient>
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <View style={styles.notifContainer}>
+        <Text style={styles.notifStatusText}>
+          Notifications : {notifStatus || 'inconnu'}
+        </Text>
+        {notifStatus !== 'granted' && (
+          <Button title="Activate Notifications" onPress={handleActivateNotifications} />
+        )}
+      </View>
+      <FlatList
+        data={sections}
+        keyExtractor={(item) => item.key}
+        ListHeaderComponent={ListHeader}
+        renderItem={({ item }) => item.render()}
+        ListFooterComponent={<View style={{ height: 30 }} />}
+      />
       <TouchableOpacity
         style={styles.floatingButton}
         onPress={() => {
@@ -649,10 +784,9 @@ const styles = StyleSheet.create({
     elevation: 5,
     minWidth: 200,
   },
-  taskTitle: { fontSize: 18, fontWeight: '600',color: 'black'},
-  taskSubtitle: { fontSize: 14, color: '#555', marginTop: 8 },
+  taskTitle: { fontSize: 18, fontWeight: '600', color: 'black' },
+  taskSubtitle: { fontSize: 14, color: 'black', marginTop: 8 },
   linkText: { fontSize: 16, color: '#1976D2', marginTop: 8 },
-  reactLogo: { height: 178, width: 290, bottom: 0, left: 0, position: 'absolute' },
   floatingButton: {
     position: 'absolute',
     bottom: 30,
@@ -672,4 +806,70 @@ const styles = StyleSheet.create({
   floatingButtonText: { fontSize: 30, color: '#fff' },
   mapContainer: { height: 300, marginTop: 10, marginBottom: 10 },
   map: { flex: 1 },
+  // Nouveaux styles pour le calendrier
+  calendarContainer: {
+    backgroundColor: '#f7f7f7',
+    borderRadius: 12,
+    padding: 15,
+    marginTop: 10,
+  },
+  calendarHeader: {
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  calendarTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  calendarGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-around',
+    marginVertical: 10,
+  },
+  calendarDay: {
+    width: 40,
+    height: 40,
+    margin: 5,
+    borderRadius: 20,
+    backgroundColor: '#eee',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calendarDaySelected: {
+    backgroundColor: '#4A90E2',
+  },
+  calendarDayWithTask: {
+    borderWidth: 2,
+    borderColor: '#FF6347',
+  },
+  calendarDayText: {
+    fontSize: 16,
+    color: '#333',
+  },
+  tasksForDayContainer: {
+    marginTop: 10,
+  },
+  sectionHeader: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginVertical: 10,
+    color: '#333',
+  },
+  taskCard: {
+    backgroundColor: '#fff',
+    padding: 15,
+    marginVertical: 5,
+    borderRadius: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 3,
+  },
+  taskCardText: {
+    fontSize: 16,
+    color: '#333',
+  },
 });

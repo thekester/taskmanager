@@ -64,4 +64,6 @@ npm install @material-ui/icons --save
 
 npm install @mui/material @mui/icons-material @emotion/react @emotion/styled
 
+npm install react-native-calendars --save
+
 ```
