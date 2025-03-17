@@ -18,8 +18,6 @@ import SQLite from 'react-native-sqlite-storage';
 import { WebView } from 'react-native-webview';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
-
-// ***** expo-router *****
 import { useLocalSearchParams, useRouter } from 'expo-router';
 
 // ***** Date pickers (web vs mobile) *****
@@ -28,7 +26,6 @@ if (Platform.OS === 'web') {
   WebDatePicker = require('react-datepicker').default;
   require('react-datepicker/dist/react-datepicker.css');
 } else {
-  // Sur mobile, on utilise react-native-date-picker
   var DatePickerMobile = require('react-native-date-picker').default;
 }
 
@@ -42,7 +39,7 @@ Notifications.setNotificationHandler({
 });
 
 // Pour les notifications natives
-async function registerForPushNotificationsAsync() {
+async function registerForPushNotificationsAsync(): Promise<void> {
   if (Constants.isDevice) {
     const { status: existingStatus } = await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
@@ -59,49 +56,7 @@ async function registerForPushNotificationsAsync() {
   }
 }
 
-// Fonction hybride pour planifier une notification de confirmation
-async function scheduleConfirmationNotification() {
-  console.log('[scheduleConfirmationNotification] Tentative de planification de notif.');
-  if (Platform.OS === 'web') {
-    // Utilisation de l'API Web Notification
-    if ('Notification' in window) {
-      if (Notification.permission === 'granted') {
-        console.log('[scheduleConfirmationNotification] Notification permission granted (web).');
-        new Notification('Tâche créée', {
-          body: 'Votre tâche a bien été enregistrée !',
-        });
-      } else if (Notification.permission !== 'denied') {
-        const permission = await Notification.requestPermission();
-        if (permission === 'granted') {
-          console.log('[scheduleConfirmationNotification] Notification permission request granted (web).');
-          new Notification('Tâche créée', {
-            body: 'Votre tâche a bien été enregistrée !',
-          });
-        } else {
-          console.log('[scheduleConfirmationNotification] Notification permission request non accordée (web).');
-        }
-      } else {
-        console.log('[scheduleConfirmationNotification] Notification permission denied (web).');
-      }
-    }
-  } else {
-    // Notification native avec expo-notifications
-    try {
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'Tâche créée',
-          body: 'Votre tâche a bien été enregistrée !',
-        },
-        trigger: null,
-      });
-      console.log('[scheduleConfirmationNotification] Notification planifiée avec succès (mobile).');
-    } catch (error) {
-      console.error('[scheduleConfirmationNotification] Erreur lors de la planification de la notif:', error);
-    }
-  }
-}
-
-// ***** Types et interfaces *****
+// Définition de l'interface Task
 interface Task {
   id: string | number;
   task: string;
@@ -110,6 +65,67 @@ interface Task {
   distance?: string;
   category: string;
 }
+
+// Nouvelle fonction pour planifier un rappel de tâche avec décalage personnalisé (pour mobile)
+async function scheduleTaskReminder(task: Task, offsetMinutes: number): Promise<void> {
+  const taskDate = new Date(task.date);
+  const now = new Date();
+  const offset = offsetMinutes * 60 * 1000;
+  const triggerTime = taskDate.getTime() - offset;
+  const delaySeconds = Math.max(Math.floor((triggerTime - now.getTime()) / 1000), 1);
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: 'Rappel de tâche',
+        body: `N'oublie pas : ${task.task}`,
+        data: { taskId: task.id },
+      },
+      trigger: { seconds: delaySeconds, repeats: false } as Notifications.TimeIntervalTriggerInput,
+    });
+    console.log('[scheduleTaskReminder] Notification planifiée dans', delaySeconds, 'secondes');
+  } catch (error) {
+    console.error('[scheduleTaskReminder] Erreur lors de la planification de la notification:', error);
+  }
+}
+
+// Pour le web, avec setTimeout (solution valable tant que la page reste ouverte)
+function scheduleTaskReminderWeb(task: Task, offsetMinutes: number): void {
+  const taskDate = new Date(task.date);
+  const now = new Date();
+  const offset = offsetMinutes * 60 * 1000;
+  const triggerTime = taskDate.getTime() - offset;
+  const delay = Math.max(triggerTime - now.getTime(), 0);
+  console.log('[scheduleTaskReminderWeb] Planification d\'un rappel dans', delay, 'ms');
+  setTimeout(() => {
+    if ('Notification' in window) {
+      if (Notification.permission === 'granted') {
+        new Notification('Rappel de tâche', {
+          body: `N'oublie pas : ${task.task}`,
+        });
+      }
+    }
+  }, delay);
+}
+
+// Fonction hybride pour planifier la notification de rappel en fonction de la config utilisateur
+const maybeScheduleNotification = async (task: Task): Promise<void> => {
+  try {
+    const configStr = await AsyncStorage.getItem('userConfig');
+    const config = configStr ? JSON.parse(configStr) : null;
+    console.log('[TasksScreen] Config chargée dans maybeScheduleNotification:', config);
+    if (config?.notification && config?.alarm) {
+      if (Platform.OS !== 'web') {
+        scheduleTaskReminder(task, config.alarmOffset);
+      } else {
+        scheduleTaskReminderWeb(task, config.alarmOffset);
+      }
+    } else {
+      console.log('[TasksScreen] Notifications ou alarmes désactivées, aucun rappel planifié.');
+    }
+  } catch (error) {
+    console.error('[TasksScreen] Erreur lors du rechargement de la config:', error);
+  }
+};
 
 // ***** SQLite si pas sur web *****
 let db: any = null;
@@ -128,7 +144,6 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
 
   if (Platform.OS === 'web') {
     const containerRef = useRef<HTMLDivElement>(null);
-
     useEffect(() => {
       console.log('[MapboxGLJSSelector] useEffect web -> init map');
       function initializeMap() {
@@ -166,7 +181,6 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
           console.log('[MapboxGLJSSelector] window.mapboxgl not found or containerRef is null');
         }
       }
-
       if (!document.getElementById('mapbox-gl-css')) {
         console.log('[MapboxGLJSSelector] injecting mapbox-gl CSS');
         const link = document.createElement('link');
@@ -204,8 +218,7 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
         initializeMap();
       }
     }, [MAPBOX_ACCESS_TOKEN, onLocationSelect]);
-
-    return <div ref={containerRef} style={{ height: 300, marginTop: 10, marginBottom: 10 }} />;
+    return <div ref={containerRef} style={{ height: '300px', marginTop: '10px', marginBottom: '10px' }} />;
   } else {
     const htmlContent = `
 <!DOCTYPE html>
@@ -304,7 +317,7 @@ export default function TasksScreen() {
   const [category, setCategory] = useState('Travail');
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
   const [notifStatus, setNotifStatus] = useState<string | null>(null);
-  const [userConfig, setUserConfig] = useState<{ alarm: boolean; notification: boolean; autre: boolean } | null>(null);
+  const [userConfig, setUserConfig] = useState<{ alarm: boolean; notification: boolean; autre: boolean; alarmOffset: number } | null>(null);
 
   // Récupération des query params : editTaskId et openModal
   const { editTaskId, openModal } = useLocalSearchParams();
@@ -313,19 +326,16 @@ export default function TasksScreen() {
   console.log('[TasksScreen] editTaskId =', editTaskId);
   console.log('[TasksScreen] openModal =', openModal);
 
-  // Si openModal est présent et à "true", on ouvre la modal
   useEffect(() => {
     if (openModal === 'true') {
       setModalVisible(true);
     }
   }, [openModal]);
 
-  // Demander les permissions de notifications au montage (pour natives)
   useEffect(() => {
     registerForPushNotificationsAsync();
   }, []);
 
-  // Vérifier l'état des permissions de notifications
   useEffect(() => {
     async function checkNotifPermissions() {
       const { status } = await Notifications.getPermissionsAsync();
@@ -351,7 +361,6 @@ export default function TasksScreen() {
     }
   };
 
-  // Charger la configuration utilisateur sauvegardée depuis config.tsx
   useEffect(() => {
     const loadUserConfig = async () => {
       try {
@@ -389,7 +398,7 @@ export default function TasksScreen() {
     }
   }, []);
 
-  const loadTasks = () => {
+  const loadTasks = (): void => {
     console.log('[TasksScreen] loadTasks called');
     if (Platform.OS !== 'web') {
       db.transaction((tx: any) => {
@@ -448,7 +457,7 @@ export default function TasksScreen() {
     }
   }, [editTaskId, tasks]);
 
-  const saveTasksToAsyncStorage = async (updatedTasks: Task[]) => {
+  const saveTasksToAsyncStorage = async (updatedTasks: Task[]): Promise<void> => {
     try {
       await AsyncStorage.setItem('tasks', JSON.stringify(updatedTasks));
       console.log('[TasksScreen] saved tasks to AsyncStorage:', updatedTasks);
@@ -457,35 +466,22 @@ export default function TasksScreen() {
     }
   };
 
-  const closeModal = () => {
+  const closeModal = (): void => {
     console.log('[TasksScreen] closeModal called');
     setModalVisible(false);
     setEditingTaskId(null);
     router.replace('/tasks');
   };
 
-  const handleSaveTask = () => {
+  const handleSaveTask = (): void => {
     console.log('[TasksScreen] handleSaveTask called');
     const dateString = date.toISOString();
     if (!taskInput || !dateString) {
       Alert.alert('Erreur', 'Veuillez remplir au moins le titre et la date.');
       return;
     }
-    // Fonction pour planifier la notif en rechargeant la config juste avant
-    const maybeScheduleNotification = async () => {
-      try {
-        const configStr = await AsyncStorage.getItem('userConfig');
-        const config = configStr ? JSON.parse(configStr) : null;
-        console.log('[TasksScreen] Config chargée dans maybeScheduleNotification:', config);
-        if (config?.notification) {
-          console.log('[TasksScreen] Les notifications sont activées, planification...');
-          scheduleConfirmationNotification();
-        } else {
-          console.log('[TasksScreen] Notifications désactivées, aucune notif planifiée.');
-        }
-      } catch (error) {
-        console.error('[TasksScreen] Erreur lors du rechargement de la config:', error);
-      }
+    const triggerNotification = (newTask: Task) => {
+      maybeScheduleNotification(newTask);
     };
 
     if (editingTaskId) {
@@ -498,7 +494,15 @@ export default function TasksScreen() {
             () => {
               console.log('[TasksScreen] updated task in SQLite -> reloading tasks');
               loadTasks();
-              maybeScheduleNotification();
+              const updatedTask: Task = {
+                id: editingTaskId,
+                task: taskInput,
+                date: dateString,
+                location,
+                distance,
+                category,
+              };
+              triggerNotification(updatedTask);
             },
             (error: any) => console.log('Error updating task in SQLite:', error)
           );
@@ -506,19 +510,13 @@ export default function TasksScreen() {
       } else {
         const updatedTasks = tasks.map((t) =>
           t.id === editingTaskId
-            ? {
-                ...t,
-                task: taskInput,
-                date: dateString,
-                location,
-                distance,
-                category,
-              }
+            ? { ...t, task: taskInput, date: dateString, location, distance, category }
             : t
         );
         setTasks(updatedTasks);
         saveTasksToAsyncStorage(updatedTasks);
-        maybeScheduleNotification();
+        const updatedTask = updatedTasks.find((t) => t.id.toString() === editingTaskId);
+        if (updatedTask) triggerNotification(updatedTask);
       }
       setEditingTaskId(null);
     } else {
@@ -531,7 +529,15 @@ export default function TasksScreen() {
             (tx: any, result: any) => {
               console.log('[TasksScreen] Task added successfully in SQLite with id:', result.insertId);
               loadTasks();
-              maybeScheduleNotification();
+              const newTask: Task = {
+                id: result.insertId,
+                task: taskInput,
+                date: dateString,
+                location,
+                distance,
+                category,
+              };
+              triggerNotification(newTask);
             },
             (error: any) => console.log("Erreur lors de l'insertion:", error)
           );
@@ -548,7 +554,7 @@ export default function TasksScreen() {
         const updatedTasks = [...tasks, newTask];
         setTasks(updatedTasks);
         saveTasksToAsyncStorage(updatedTasks);
-        maybeScheduleNotification();
+        triggerNotification(newTask);
       }
     }
     setTaskInput('');
@@ -559,7 +565,7 @@ export default function TasksScreen() {
     closeModal();
   };
 
-  const handleDeleteTask = (id: string | number) => {
+  const handleDeleteTask = (id: string | number): void => {
     console.log('[TasksScreen] handleDeleteTask -> id=', id);
     if (Platform.OS !== 'web') {
       db.transaction((tx: any) => {
@@ -580,7 +586,7 @@ export default function TasksScreen() {
     }
   };
 
-  const handleEditTask = (id: string | number) => {
+  const handleEditTask = (id: string | number): void => {
     console.log('[TasksScreen] handleEditTask -> id=', id);
     const taskToEdit = tasks.find((t) => t.id === id);
     if (taskToEdit) {
@@ -597,7 +603,7 @@ export default function TasksScreen() {
     }
   };
 
-  const sortTasksByCategory = () => {
+  const sortTasksByCategory = (): { title: string; data: Task[] }[] => {
     const sorted: { [key: string]: Task[] } = {};
     tasks.forEach((t) => {
       const cat = t.category || 'Sans catégorie';
@@ -632,8 +638,6 @@ export default function TasksScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.header}>Gestion des Tâches</Text>
-
-      {/* Section pour l'état des notifications et activation */}
       <View style={styles.notifContainer}>
         <Text style={styles.notifStatusText}>
           Notifications : {notifStatus || 'inconnu'}
@@ -642,7 +646,6 @@ export default function TasksScreen() {
           <Button title="Activate Notifications" onPress={handleActivateNotifications} />
         )}
       </View>
-
       <TouchableOpacity
         style={styles.addButton}
         onPress={() => {
@@ -658,7 +661,6 @@ export default function TasksScreen() {
       >
         <Text style={styles.addButtonText}>+ Create a new Task</Text>
       </TouchableOpacity>
-
       <SectionList
         sections={sortTasksByCategory()}
         keyExtractor={(item) => item.id.toString()}
@@ -667,8 +669,6 @@ export default function TasksScreen() {
           <Text style={styles.sectionHeader}>{section.title}</Text>
         )}
       />
-
-      {/* MODAL de création / édition */}
       <Modal
         visible={modalVisible}
         animationType="slide"
@@ -680,7 +680,6 @@ export default function TasksScreen() {
             <Text style={styles.modalTitle}>
               {editingTaskId ? 'Modifier la tâche' : 'Nouvelle Tâche'}
             </Text>
-
             <TextInput
               style={styles.modalInput}
               placeholder="Titre de la tâche"
@@ -690,7 +689,6 @@ export default function TasksScreen() {
                 setTaskInput(text);
               }}
             />
-
             {Platform.OS === 'web' ? (
               <WebDatePicker
                 selected={date}
@@ -714,7 +712,6 @@ export default function TasksScreen() {
                 mode="datetime"
               />
             )}
-
             <TextInput
               style={styles.modalInput}
               placeholder="Emplacement (optionnel)"
@@ -724,7 +721,6 @@ export default function TasksScreen() {
                 setLocation(text);
               }}
             />
-
             <TextInput
               style={styles.modalInput}
               placeholder="Distance (optionnel)"
@@ -735,7 +731,6 @@ export default function TasksScreen() {
               }}
               keyboardType="numeric"
             />
-
             <Picker
               selectedValue={category}
               style={styles.picker}
@@ -748,14 +743,12 @@ export default function TasksScreen() {
               <Picker.Item label="Famille" value="Famille" />
               <Picker.Item label="Divers" value="Divers" />
             </Picker>
-
             <MapboxGLJSSelector
-              onLocationSelect={(coords) => {
+              onLocationSelect={(coords: number[]) => {
                 console.log('[TasksScreen] onLocationSelect from Mapbox ->', coords);
                 setLocation(JSON.stringify(coords));
               }}
             />
-
             <View style={styles.modalButtonContainer}>
               <TouchableOpacity style={styles.modalButton} onPress={handleSaveTask}>
                 <Text style={styles.modalButtonText}>

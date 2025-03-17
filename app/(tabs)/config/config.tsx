@@ -1,5 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, Switch, Button, Alert, StyleSheet, SafeAreaView } from 'react-native';
+import {
+  View,
+  Text,
+  Switch,
+  Button,
+  Alert,
+  StyleSheet,
+  SafeAreaView,
+  TextInput,
+  PermissionsAndroid,
+  Platform,
+  Linking,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
@@ -9,6 +21,65 @@ export default function ConfigScreen() {
   const [alarm, setAlarm] = useState(false);
   const [notification, setNotification] = useState(true);
   const [autre, setAutre] = useState(false);
+  const [alarmOffset, setAlarmOffset] = useState('5'); // Valeur par défaut en minutes
+
+  // Fonction de vérification et gestion de la permission d'alarmes sur Android
+  const checkAndHandleAlarmPermission = async () => {
+    if (Platform.OS === 'android') {
+      try {
+        // On force la conversion pour satisfaire TypeScript
+        const granted = await PermissionsAndroid.check(
+          "android.permission.SCHEDULE_EXACT_ALARM" as any
+        );
+        if (!granted) {
+          Alert.alert(
+            "Permission d'Alarme manquante",
+            "Vous n'avez pas la permission de définir des alarmes exactes. Voulez-vous ouvrir les paramètres pour l'activer ?",
+            [
+              {
+                text: "Ouvrir les paramètres",
+                onPress: async () => {
+                  await Linking.openSettings();
+                  // Attendre quelques secondes puis re-vérifier
+                  setTimeout(async () => {
+                    const newGranted = await PermissionsAndroid.check(
+                      "android.permission.SCHEDULE_EXACT_ALARM" as any
+                    );
+                    if (!newGranted) {
+                      Alert.alert(
+                        "Droits non activés",
+                        "Vous n'avez pas activé les droits d'alarme, donc aucune alarme ne sera planifiée."
+                      );
+                      setAlarm(false);
+                    }
+                  }, 3000);
+                },
+              },
+              {
+                text: "Annuler",
+                style: 'cancel',
+                onPress: () => {
+                  Alert.alert(
+                    "Droits non activés",
+                    "Vous n'avez pas activé les droits d'alarme, donc aucune alarme ne sera planifiée."
+                  );
+                  setAlarm(false);
+                },
+              },
+            ]
+          );
+        }
+      } catch (error) {
+        console.error('Erreur lors de la vérification de la permission SCHEDULE_EXACT_ALARM :', error);
+      }
+    }
+  };
+
+
+  // Vérifier la permission dès le montage
+  useEffect(() => {
+    checkAndHandleAlarmPermission();
+  }, []);
 
   // Charger la configuration sauvegardée au montage
   useEffect(() => {
@@ -20,6 +91,8 @@ export default function ConfigScreen() {
           setAlarm(config.alarm);
           setNotification(config.notification);
           setAutre(config.autre);
+          // On vérifie si un décalage a été défini, sinon on garde la valeur par défaut "5"
+          setAlarmOffset(config.alarmOffset ? config.alarmOffset.toString() : '5');
         }
       } catch (error) {
         console.error('Erreur lors du chargement de la configuration:', error);
@@ -29,12 +102,13 @@ export default function ConfigScreen() {
   }, []);
 
   const saveConfig = async () => {
-    const config = { alarm, notification, autre };
+    // Conversion du décalage en entier (avec 5 comme valeur par défaut)
+    const config = { alarm, notification, autre, alarmOffset: parseInt(alarmOffset, 10) || 5 };
     try {
       await AsyncStorage.setItem('userConfig', JSON.stringify(config));
       Alert.alert(
         'Configuration des rappels',
-        `Alarme: ${alarm ? 'Oui' : 'Non'}, Notification: ${notification ? 'Oui' : 'Non'}, Autre: ${autre ? 'Oui' : 'Non'}`
+        `Alarme: ${alarm ? 'Oui' : 'Non'}, Notification: ${notification ? 'Oui' : 'Non'}, Autre: ${autre ? 'Oui' : 'Non'}, Décalage: ${alarmOffset} minutes`
       );
       router.back();
     } catch (error) {
@@ -51,7 +125,12 @@ export default function ConfigScreen() {
           <Text style={styles.configLabel}>Alarme</Text>
           <Switch 
             value={alarm} 
-            onValueChange={setAlarm} 
+            onValueChange={(value) => {
+              setAlarm(value);
+              if (value) {
+                checkAndHandleAlarmPermission();
+              }
+            }} 
             trackColor={{ false: '#ccc', true: '#4CAF50' }}
             thumbColor={alarm ? '#fff' : '#f4f3f4'}
           />
@@ -72,6 +151,16 @@ export default function ConfigScreen() {
             onValueChange={setAutre} 
             trackColor={{ false: '#ccc', true: '#FF9800' }}
             thumbColor={autre ? '#fff' : '#f4f3f4'}
+          />
+        </View>
+        <View style={styles.configRow}>
+          <Text style={styles.configLabel}>Décalage d'Alarme (min)</Text>
+          <TextInput
+            style={styles.textInput}
+            value={alarmOffset}
+            onChangeText={setAlarmOffset}
+            keyboardType="numeric"
+            placeholder="Minutes"
           />
         </View>
         <View style={styles.buttonRow}>
@@ -121,6 +210,16 @@ const styles = StyleSheet.create({
   configLabel: {
     fontSize: 18,
     color: '#555',
+  },
+  textInput: {
+    height: 40,
+    width: 100,
+    borderColor: '#ddd',
+    borderWidth: 1,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    textAlign: 'center',
+    backgroundColor: '#f9f9f9',
   },
   buttonRow: {
     flexDirection: 'row',
