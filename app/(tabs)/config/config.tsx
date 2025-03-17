@@ -45,41 +45,86 @@ export default function ConfigScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Text style={styles.title}>Configuration des Rappels</Text>
-      <View style={styles.configRow}>
-        <Text style={styles.configLabel}>Alarme</Text>
-        <Switch value={alarm} onValueChange={setAlarm} />
-      </View>
-      <View style={styles.configRow}>
-        <Text style={styles.configLabel}>Notification</Text>
-        <Switch value={notification} onValueChange={setNotification} />
-      </View>
-      <View style={styles.configRow}>
-        <Text style={styles.configLabel}>Autre</Text>
-        <Switch value={autre} onValueChange={setAutre} />
-      </View>
-      <View style={styles.buttonRow}>
-        <Button title="Annuler" onPress={() => router.back()} />
-        <Button title="Sauvegarder" onPress={saveConfig} />
+      <View style={styles.card}>
+        <Text style={styles.title}>Configuration des Rappels</Text>
+        <View style={styles.configRow}>
+          <Text style={styles.configLabel}>Alarme</Text>
+          <Switch 
+            value={alarm} 
+            onValueChange={setAlarm} 
+            trackColor={{ false: '#ccc', true: '#4CAF50' }}
+            thumbColor={alarm ? '#fff' : '#f4f3f4'}
+          />
+        </View>
+        <View style={styles.configRow}>
+          <Text style={styles.configLabel}>Notification</Text>
+          <Switch 
+            value={notification} 
+            onValueChange={setNotification} 
+            trackColor={{ false: '#ccc', true: '#2196F3' }}
+            thumbColor={notification ? '#fff' : '#f4f3f4'}
+          />
+        </View>
+        <View style={styles.configRow}>
+          <Text style={styles.configLabel}>Autre</Text>
+          <Switch 
+            value={autre} 
+            onValueChange={setAutre} 
+            trackColor={{ false: '#ccc', true: '#FF9800' }}
+            thumbColor={autre ? '#fff' : '#f4f3f4'}
+          />
+        </View>
+        <View style={styles.buttonRow}>
+          <Button title="Annuler" onPress={() => router.back()} color="#E57373" />
+          <Button title="Sauvegarder" onPress={saveConfig} color="#4CAF50" />
+        </View>
       </View>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 20 },
-  title: { fontSize: 22, marginBottom: 20, fontWeight: 'bold', textAlign: 'center' },
+  container: {
+    flex: 1,
+    backgroundColor: '#F2F2F2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+  },
+  card: {
+    width: '100%',
+    maxWidth: 500,
+    backgroundColor: '#fff',
+    padding: 30,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
+    elevation: 6,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#333',
+    marginBottom: 25,
+    textAlign: 'center',
+  },
   configRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 12,
-    marginBottom: 12,
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderColor: '#eee',
   },
-  configLabel: { fontSize: 16 },
+  configLabel: {
+    fontSize: 18,
+    color: '#555',
+  },
   buttonRow: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    marginTop: 40,
+    justifyContent: 'space-between',
+    marginTop: 30,
   },
 });

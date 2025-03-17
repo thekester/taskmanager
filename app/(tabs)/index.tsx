@@ -46,7 +46,6 @@ if (Platform.OS !== 'web') {
 interface MapboxGLJSWebViewProps {
   tasks?: Task[];
   onEditTask?: (taskId: string) => void;
-  // Nouvelle prop pour faire flyTo
   flyToCoords?: [number, number] | null;
 }
 
@@ -69,12 +68,9 @@ const MapboxGLJSWebView: React.FC<MapboxGLJSWebViewProps> = ({
 
   const markers = extractMarkers();
   const mapContainer = useRef<HTMLDivElement>(null);
-  // Référence pour stocker l'instance de la carte (web)
   const mapRef = useRef<any>(null);
-  // Référence pour la WebView (mobile)
   const webviewRef = useRef<WebView>(null);
 
-  // Version Web
   if (Platform.OS === 'web') {
     useEffect(() => {
       function initializeMap() {
@@ -118,12 +114,8 @@ const MapboxGLJSWebView: React.FC<MapboxGLJSWebViewProps> = ({
                 <div>
                   <strong>${task.task}</strong><br>
                   Date: ${task.date}<br>
-                  ${
-                    task.distance ? 'Distance: ' + task.distance + 'm<br>' : ''
-                  }
-                  ${
-                    task.category ? 'Catégorie: ' + task.category + '<br>' : ''
-                  }
+                  ${task.distance ? 'Distance: ' + task.distance + 'm<br>' : ''}
+                  ${task.category ? 'Catégorie: ' + task.category + '<br>' : ''}
                   <button onclick="handleEdit('${task.id}')">Modifier</button>
                 </div>
               `;
@@ -173,7 +165,6 @@ const MapboxGLJSWebView: React.FC<MapboxGLJSWebViewProps> = ({
       }
     }, [MAPBOX_ACCESS_TOKEN, tasks, onEditTask]);
 
-    // Fly-to si flyToCoords change
     useEffect(() => {
       if (flyToCoords && mapRef.current) {
         mapRef.current.flyTo({
@@ -190,9 +181,7 @@ const MapboxGLJSWebView: React.FC<MapboxGLJSWebViewProps> = ({
         style={{ height: '300px', width: '100%', marginTop: '10px', marginBottom: '10px' }}
       />
     );
-  }
-  // Version Mobile via WebView
-  else {
+  } else {
     const htmlContent = `
 <!DOCTYPE html>
 <html>
@@ -257,7 +246,6 @@ const MapboxGLJSWebView: React.FC<MapboxGLJSWebViewProps> = ({
             .addTo(map);
         });
       });
-      // Écoute des messages pour flyTo depuis React Native
       document.addEventListener("message", function(event) {
         try {
           const data = JSON.parse(event.data);
@@ -276,7 +264,6 @@ const MapboxGLJSWebView: React.FC<MapboxGLJSWebViewProps> = ({
   </body>
 </html>
     `;
-    // Injection du flyTo dans la WebView
     useEffect(() => {
       if (flyToCoords && webviewRef.current) {
         const jsCode = `
@@ -290,7 +277,6 @@ const MapboxGLJSWebView: React.FC<MapboxGLJSWebViewProps> = ({
         webviewRef.current.injectJavaScript(jsCode);
       }
     }, [flyToCoords]);
-
     return (
       <View style={styles.mapContainer}>
         <WebView
@@ -326,14 +312,11 @@ export default function HomeScreen() {
   const [distance, setDistance] = useState('');
   const [category, setCategory] = useState('Travail');
   const [editingTaskId, setEditingTaskId] = useState<string | null>(null);
-  // Nouvelle state pour flyTo (coordonnées)
   const [flyToCoords, setFlyToCoords] = useState<[number, number] | null>(null);
-  // State pour vérifier l'état des notifications
   const [notifStatus, setNotifStatus] = useState<string | null>(null);
 
   const router = useRouter();
 
-  // Vérifier l'état des permissions de notifications au montage
   useEffect(() => {
     async function checkNotifPermissions() {
       const { status } = await Notifications.getPermissionsAsync();
@@ -342,7 +325,6 @@ export default function HomeScreen() {
     checkNotifPermissions();
   }, []);
 
-  // Fonction pour activer les notifications
   const handleActivateNotifications = async () => {
     const { status } = await Notifications.requestPermissionsAsync();
     setNotifStatus(status);
@@ -358,7 +340,6 @@ export default function HomeScreen() {
     }
   };
 
-  // Chargement initial ou depuis le focus
   const loadRecentTasks = () => {
     const today = new Date().toISOString().slice(0, 10);
     db.transaction((tx: any) => {
@@ -411,7 +392,6 @@ export default function HomeScreen() {
     setUpcomingTasks(upcoming);
   };
 
-  // useFocusEffect pour recharger les tâches à chaque focus de l'écran
   useFocusEffect(
     useCallback(() => {
       if (Platform.OS !== 'web') {
@@ -501,7 +481,6 @@ export default function HomeScreen() {
     setCategory('Travail');
   };
 
-  // Pour l'édition depuis la carte
   const handleEditTaskFromMap = (taskId: string) => {
     const allTasks = [...recentTasks, ...upcomingTasks];
     const taskToEdit = allTasks.find((t) => t.id.toString() === taskId);
@@ -517,13 +496,10 @@ export default function HomeScreen() {
     }
   };
 
-  // Fonction pour recentrer la carte sur les coordonnées d'une tâche
   const handleViewOnMap = (coords: [number, number]) => {
     setFlyToCoords(coords);
-    // Vous pouvez ajouter ici un scroll ou une navigation vers la section carte si nécessaire
   };
 
-  // Composant pour afficher une tâche avec le bouton "View on Map" si la tâche possède une localisation
   const TaskItem: React.FC<{ task: Task }> = ({ task }) => (
     <ThemedView style={styles.taskItem}>
       <ThemedText style={styles.taskTitle}>{task.task}</ThemedText>
@@ -537,7 +513,7 @@ export default function HomeScreen() {
             }
           }}
         >
-          <ThemedText style={{ color: 'blue', marginTop: 8 }}>View on Map</ThemedText>
+          <ThemedText style={styles.linkText}>View on Map</ThemedText>
         </TouchableOpacity>
       )}
     </ThemedView>
@@ -545,7 +521,6 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Section pour afficher l'état des notifications et activer si nécessaire */}
       <View style={styles.notifContainer}>
         <Text style={styles.notifStatusText}>
           Notifications : {notifStatus || 'inconnu'}
@@ -576,9 +551,7 @@ export default function HomeScreen() {
         <ThemedView style={styles.sectionContainer}>
           <ThemedText type="subtitle">Mes tâches récemment créées</ThemedText>
           {recentTasks.length === 0 ? (
-            <ThemedText style={styles.emptyText}>
-              Aucune tâche encore ajoutée
-            </ThemedText>
+            <ThemedText style={styles.emptyText}>Aucune tâche encore ajoutée</ThemedText>
           ) : (
             <FlatList
               data={recentTasks}
@@ -629,7 +602,6 @@ export default function HomeScreen() {
           setLocation('');
           setDistance('');
           setCategory('Travail');
-          // Navigue vers le screen Tasks en passant le paramètre openModal=true
           router.push('/tasks?openModal=true');
         }}
       >
@@ -640,7 +612,10 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: {
+    flex: 1,
+    backgroundColor: Platform.select({ web: '#fafafa', default: '#fff' }),
+  },
   notifContainer: {
     padding: 10,
     backgroundColor: '#eee',
@@ -674,8 +649,9 @@ const styles = StyleSheet.create({
     elevation: 5,
     minWidth: 200,
   },
-  taskTitle: { fontSize: 18, fontWeight: '600' },
+  taskTitle: { fontSize: 18, fontWeight: '600',color: 'black'},
   taskSubtitle: { fontSize: 14, color: '#555', marginTop: 8 },
+  linkText: { fontSize: 16, color: '#1976D2', marginTop: 8 },
   reactLogo: { height: 178, width: 290, bottom: 0, left: 0, position: 'absolute' },
   floatingButton: {
     position: 'absolute',
