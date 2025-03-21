@@ -102,6 +102,14 @@ function scheduleTaskReminderWeb(task: Task, offsetMinutes: number): void {
 // Nouvelle fonction pour envoyer une notification immédiate quand une tâche est créée
 async function immediateNotification(task: Task): Promise<void> {
   try {
+    const configStr = await AsyncStorage.getItem('userConfig');
+    const config = configStr ? JSON.parse(configStr) : null;
+
+    if (!config?.notification) {
+      console.log('[immediateNotification] Notifications désactivées, rien envoyé.');
+      return;
+    }
+
     if (Platform.OS !== 'web') {
       await Notifications.scheduleNotificationAsync({
         content: {
@@ -113,19 +121,18 @@ async function immediateNotification(task: Task): Promise<void> {
       });
       console.log('[immediateNotification] Notification envoyée immédiatement.');
     } else {
-      if ('Notification' in window) {
-        if (Notification.permission === 'granted') {
-          new Notification('Nouvelle Tâche Créée', {
-            body: `Tâche: ${task.task}`,
-          });
-          console.log('[immediateNotification] Notification envoyée sur le web.');
-        }
+      if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification('Nouvelle Tâche Créée', {
+          body: `Tâche: ${task.task}`,
+        });
+        console.log('[immediateNotification] Notification envoyée sur le web.');
       }
     }
   } catch (error) {
     console.error('[immediateNotification] Erreur lors de l’envoi de la notification immédiate:', error);
   }
 }
+
 
 // Fonction hybride pour planifier la notification de rappel en fonction de la config utilisateur
 const maybeScheduleNotification = async (task: Task): Promise<void> => {
