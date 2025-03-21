@@ -766,7 +766,7 @@ export default function HomeScreen() {
         ListFooterComponent={<View style={{ height: 30 }} />}
       />
       {/* Bouton flottant avec 3 allers-retours de bounce */}
-      <Animatable.View animation="bounce" iterationCount={3} duration={3000}>
+      <Animatable.View animation="bounce" iterationCount={8} duration={3000}>
         <TouchableOpacity
           style={styles.floatingButton}
           onPress={() => {

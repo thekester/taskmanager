@@ -56,17 +56,7 @@ async function registerForPushNotificationsAsync(): Promise<void> {
   }
 }
 
-// Définition de l'interface Task
-interface Task {
-  id: string | number;
-  task: string;
-  date: string;
-  location?: string;
-  distance?: string;
-  category: string;
-}
-
-// Nouvelle fonction pour planifier un rappel de tâche avec décalage personnalisé (pour mobile)
+// Fonction pour planifier un rappel de tâche avec décalage personnalisé (pour mobile)
 async function scheduleTaskReminder(task: Task, offsetMinutes: number): Promise<void> {
   const taskDate = new Date(task.date);
   const now = new Date();
@@ -81,6 +71,8 @@ async function scheduleTaskReminder(task: Task, offsetMinutes: number): Promise<
         data: { taskId: task.id },
       },
       trigger: { seconds: delaySeconds, repeats: false } as Notifications.TimeIntervalTriggerInput,
+
+
     });
     console.log('[scheduleTaskReminder] Notification planifiée dans', delaySeconds, 'secondes');
   } catch (error) {
@@ -105,6 +97,34 @@ function scheduleTaskReminderWeb(task: Task, offsetMinutes: number): void {
       }
     }
   }, delay);
+}
+
+// Nouvelle fonction pour envoyer une notification immédiate quand une tâche est créée
+async function immediateNotification(task: Task): Promise<void> {
+  try {
+    if (Platform.OS !== 'web') {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Nouvelle Tâche Créée',
+          body: `Tâche: ${task.task}`,
+          data: { taskId: task.id },
+        },
+        trigger: { seconds: 1, repeats: false } as Notifications.TimeIntervalTriggerInput,
+      });
+      console.log('[immediateNotification] Notification envoyée immédiatement.');
+    } else {
+      if ('Notification' in window) {
+        if (Notification.permission === 'granted') {
+          new Notification('Nouvelle Tâche Créée', {
+            body: `Tâche: ${task.task}`,
+          });
+          console.log('[immediateNotification] Notification envoyée sur le web.');
+        }
+      }
+    }
+  } catch (error) {
+    console.error('[immediateNotification] Erreur lors de l’envoi de la notification immédiate:', error);
+  }
 }
 
 // Fonction hybride pour planifier la notification de rappel en fonction de la config utilisateur
@@ -203,7 +223,7 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
         initializeMap();
       }
     }, [MAPBOX_ACCESS_TOKEN, onLocationSelect]);
-    return <div ref={containerRef} style={{ height: '300px', marginVertical: 10 }} />;
+    return <div ref={containerRef} style={{ height: '300px', margin: '10px 0' }} />;
   } else {
     const htmlContent = `
 <!DOCTYPE html>
@@ -276,9 +296,19 @@ const MapboxGLJSSelector: React.FC<MapboxGLJSSelectorProps> = ({ onLocationSelec
 };
 
 const selectorStyles = StyleSheet.create({
-  container: { height: 300, marginVertical: 10 },
+  container: { height: 300 },
   webview: { flex: 1 },
 });
+
+// Définition de l'interface Task
+interface Task {
+  id: string | number;
+  task: string;
+  date: string;
+  location?: string;
+  distance?: string;
+  category: string;
+}
 
 // ===========================
 // Tâches Screen principal
@@ -481,6 +511,9 @@ export default function TasksScreen() {
                 distance,
                 category,
               };
+              // Envoi immédiat de la notification
+              immediateNotification(newTask);
+              // Planification du rappel en fonction des paramètres utilisateur
               triggerNotification(newTask);
             },
             (error: any) => console.log("Erreur lors de l'insertion:", error)
@@ -498,6 +531,9 @@ export default function TasksScreen() {
         const updatedTasks = [...tasks, newTask];
         setTasks(updatedTasks);
         saveTasksToAsyncStorage(updatedTasks);
+        // Envoi immédiat de la notification
+        immediateNotification(newTask);
+        // Planification du rappel en fonction des paramètres utilisateur
         triggerNotification(newTask);
       }
     }

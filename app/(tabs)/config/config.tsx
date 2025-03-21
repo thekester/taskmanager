@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,8 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-community/netinfo';
+import { Picker } from '@react-native-picker/picker';
 
 export default function ConfigScreen() {
   const router = useRouter();
@@ -21,13 +23,16 @@ export default function ConfigScreen() {
   const [alarm, setAlarm] = useState(false);
   const [notification, setNotification] = useState(true);
   const [autre, setAutre] = useState(false);
-  const [alarmOffset, setAlarmOffset] = useState('5'); // Valeur par défaut en minutes
+  const [alarmOffset, setAlarmOffset] = useState('5'); // en minutes
 
-  // Fonction de vérification et gestion de la permission d'alarmes sur Android
+  // États pour le téléchargement des marées (ou tuiles) et la sélection de région
+  const [selectedRegion, setSelectedRegion] = useState('France');
+  const [isDownloading, setIsDownloading] = useState(false);
+
+  // Fonction de vérification et gestion de la permission d'alarmes sur Android (inchangée)
   const checkAndHandleAlarmPermission = async () => {
     if (Platform.OS === 'android') {
       try {
-        // On force la conversion pour satisfaire TypeScript
         const granted = await PermissionsAndroid.check(
           "android.permission.SCHEDULE_EXACT_ALARM" as any
         );
@@ -40,7 +45,6 @@ export default function ConfigScreen() {
                 text: "Ouvrir les paramètres",
                 onPress: async () => {
                   await Linking.openSettings();
-                  // Attendre quelques secondes puis re-vérifier
                   setTimeout(async () => {
                     const newGranted = await PermissionsAndroid.check(
                       "android.permission.SCHEDULE_EXACT_ALARM" as any
@@ -75,13 +79,11 @@ export default function ConfigScreen() {
     }
   };
 
-
-  // Vérifier la permission dès le montage
   useEffect(() => {
     checkAndHandleAlarmPermission();
   }, []);
 
-  // Charger la configuration sauvegardée au montage
+  // Charger la configuration sauvegardée
   useEffect(() => {
     const loadConfig = async () => {
       try {
@@ -91,7 +93,6 @@ export default function ConfigScreen() {
           setAlarm(config.alarm);
           setNotification(config.notification);
           setAutre(config.autre);
-          // On vérifie si un décalage a été défini, sinon on garde la valeur par défaut "5"
           setAlarmOffset(config.alarmOffset ? config.alarmOffset.toString() : '5');
         }
       } catch (error) {
@@ -102,7 +103,6 @@ export default function ConfigScreen() {
   }, []);
 
   const saveConfig = async () => {
-    // Conversion du décalage en entier (avec 5 comme valeur par défaut)
     const config = { alarm, notification, autre, alarmOffset: parseInt(alarmOffset, 10) || 5 };
     try {
       await AsyncStorage.setItem('userConfig', JSON.stringify(config));
@@ -116,6 +116,71 @@ export default function ConfigScreen() {
       Alert.alert('Erreur', "La configuration n'a pas pu être sauvegardée.");
     }
   };
+
+  // Fonction de téléchargement des tuiles hors-ligne
+  // Ici, nous utilisons un exemple simplifié qui télécharge les tuiles pour une zone et un intervalle de zoom donnés.
+  const downloadOfflineTiles = async () => {
+    if (!('caches' in window)) {
+      Alert.alert("Cache API non supportée", "Votre navigateur ne supporte pas la Cache API.");
+      return;
+    }
+    // Définir les paramètres de la zone à télécharger
+    const bounds = { // [minLng, minLat, maxLng, maxLat]
+      minLng: -74.5,
+      minLat: 40,
+      maxLng: -73.5,
+      maxLat: 41,
+    };
+    const minZoom = 2;
+    const maxZoom = 4; // Par exemple, on télécharge de 2 à 4
+
+    const tileUrlTemplate = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+    let tileUrls: string[] = [];
+
+    // Fonction utilitaire pour calculer les indices de tuiles (simplifiée)
+    const long2tile = (lon: number, zoom: number) => Math.floor(((lon + 180) / 360) * Math.pow(2, zoom));
+    const lat2tile = (lat: number, zoom: number) => {
+      const rad = lat * Math.PI / 180;
+      return Math.floor((1 - Math.log(Math.tan(rad) + 1 / Math.cos(rad)) / Math.PI) / 2 * Math.pow(2, zoom));
+    };
+
+    for (let z = minZoom; z <= maxZoom; z++) {
+      const xMin = long2tile(bounds.minLng, z);
+      const xMax = long2tile(bounds.maxLng, z);
+      const yMin = lat2tile(bounds.maxLat, z); // Notez que pour latitude, l'ordre s'inverse
+      const yMax = lat2tile(bounds.minLat, z);
+      for (let x = xMin; x <= xMax; x++) {
+        for (let y = yMin; y <= yMax; y++) {
+          const url = tileUrlTemplate.replace('{z}', z.toString()).replace('{x}', x.toString()).replace('{y}', y.toString());
+          tileUrls.push(url);
+        }
+      }
+    }
+
+    try {
+      const cacheName = 'offline-tiles';
+      const cache = await caches.open(cacheName);
+      let downloaded = 0;
+      for (const url of tileUrls) {
+        try {
+          const response = await fetch(url);
+          if (response.ok) {
+            await cache.put(url, response);
+            downloaded++;
+          }
+        } catch (err) {
+          console.error('Erreur lors du téléchargement de', url, err);
+        }
+      }
+      Alert.alert("Téléchargement terminé", `${downloaded} tuiles ont été téléchargées et mises en cache.`);
+    } catch (error) {
+      console.error('Erreur lors du téléchargement des tuiles hors-ligne :', error);
+      Alert.alert("Erreur", "Le téléchargement des tuiles hors-ligne a échoué.");
+    }
+  };
+
+  // Pour cet exemple, nous gardons le reste de votre code inchangé (gestion des notifications, des tâches, etc.)
+  // ...
 
   return (
     <SafeAreaView style={styles.container}>
@@ -163,6 +228,19 @@ export default function ConfigScreen() {
             placeholder="Minutes"
           />
         </View>
+
+        {/* Section hors-ligne : téléchargement des tuiles */}
+        {Platform.OS === 'web' && (
+          <View style={styles.mapSection}>
+            <Text style={styles.sectionTitle}>Tuiles hors-ligne</Text>
+            <Button
+              title={isDownloading ? "Téléchargement en cours..." : "Télécharger les tuiles hors-ligne"}
+              onPress={downloadOfflineTiles}
+              disabled={isDownloading}
+            />
+          </View>
+        )}
+
         <View style={styles.buttonRow}>
           <Button title="Annuler" onPress={() => router.back()} color="#E57373" />
           <Button title="Sauvegarder" onPress={saveConfig} color="#4CAF50" />
@@ -207,6 +285,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderColor: '#eee',
   },
+  configRowColumn: {
+    flexDirection: 'column',
+    width: '100%',
+    paddingVertical: 15,
+    borderBottomWidth: 1,
+    borderColor: '#eee',
+  },
   configLabel: {
     fontSize: 18,
     color: '#555',
@@ -225,5 +310,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginTop: 30,
+  },
+  mapSection: {
+    marginTop: 20,
+    alignItems: 'center'
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    marginBottom: 10,
+    textAlign: 'center',
+    color: '#333',
   },
 });

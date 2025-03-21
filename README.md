@@ -68,4 +68,6 @@ npm install react-native-calendars --save
 npm install animejs --save
 npm install react-native-animatable
 
+npm install --save @react-native-community/netinfo
+
 ```
