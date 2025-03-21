@@ -8,6 +8,8 @@ This is an [Expo](https://expo.dev) project created with [`create-expo-app`](htt
 ## 📱 Présentation de l'application
 Task Manager est une application multiplateforme conçue avec Expo et React Native, permettant de gérer efficacement vos tâches au quotidien, de les visualiser sur une carte interactive, et de recevoir des rappels personnalisés sous forme de notifications ou d'alarmes.
 
+Développé par Mathis JAMIN et Théophile Avenel
+
 ---
 
 ## ✨ Fonctionnalités clés
@@ -79,6 +81,9 @@ This command will move the starter code to the **app-example** directory and cre
 ### ✨ Deuxième étape
 [![Voir la vidéo - Étape 2](https://img.youtube.com/vi/xVnZLxmwNOc/maxresdefault.jpg)](https://youtu.be/xVnZLxmwNOc)
 
+### ✨ Rendu final
+[![Voir la vidéo - Étape 3](https://img.youtube.com/vi/12m2co5ozTA/maxresdefault.jpg)](https://youtu.be/12m2co5ozTA)
+
 
 ## Installed Dependencies
 
@@ -108,10 +113,3 @@ To learn more about developing your project with Expo, look at the following res
 
 - [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
 - [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
-
-## Join the community
-
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open-source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
